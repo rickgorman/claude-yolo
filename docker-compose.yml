@@ -1,0 +1,35 @@
+# docker-compose.yml for claude-yolo
+# This file is provided as a reference/template
+# The main bin/claude-yolo script uses docker run directly for flexibility
+
+version: '3.8'
+
+services:
+  claude-yolo:
+    build: .
+    image: claude-yolo:latest
+    network_mode: host
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    environment:
+      - CHROME_CDP_URL=http://localhost:9222
+      - RUBY_VERSION=${RUBY_VERSION:-3.3.0}
+      - DB_HOST=localhost
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+    volumes:
+      # Project workspace - set via WORKTREE_PATH env var
+      - ${WORKTREE_PATH:-.}:/workspace
+      # Named volumes for caching
+      - claude-home:/home/claude/.claude
+      - gems-cache:/home/claude/.gems
+      - rbenv-versions:/home/claude/.rbenv/versions
+      # node_modules as a named volume prevents overwriting host's node_modules
+      - node-modules:/workspace/node_modules
+
+volumes:
+  claude-home:
+  gems-cache:
+  rbenv-versions:
+  node-modules:

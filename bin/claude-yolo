@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# frozen_string_literal: false
+#
+# claude-yolo: Run Claude Code in an isolated Docker container with --dangerously-skip-permissions
+#
+# Usage:
+#   claude-yolo [--yolo] [claude args...]
+#
+# When --yolo is passed, runs Claude in a Docker container with:
+#   - Full permission bypass (--dangerously-skip-permissions)
+#   - Host network access (Postgres, Chrome CDP)
+#   - Isolated filesystem with volume caching
+#
+# Without --yolo, passes through to the native claude command.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Image name for our Docker container
+IMAGE_NAME="claude-yolo"
+IMAGE_TAG="latest"
+
+# CDP port for Chrome remote debugging
+CDP_PORT=9222
+
+#######################################
+# Log a message to stderr
+#######################################
+log() {
+  echo "[claude-yolo] $*" >&2
+}
+
+#######################################
+# Log an error and exit
+#######################################
+die() {
+  log "ERROR: $*"
+  exit 1
+}
+
+#######################################
+# Get the git worktree root path
+#######################################
+get_worktree_path() {
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
+#######################################
+# Generate a hash-based identifier from a path
+#######################################
+path_hash() {
+  local path="$1"
+  echo -n "$path" | md5 | cut -c1-8
+}
+
+#######################################
+# Get container name for current worktree
+#######################################
+get_container_name() {
+  local worktree_path
+  worktree_path=$(get_worktree_path)
+  local hash
+  hash=$(path_hash "$worktree_path")
+  echo "claude-yolo-${hash}"
+}
+
+#######################################
+# Check if container is running
+#######################################
+container_running() {
+  local container_name="$1"
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"
+}
+
+#######################################
+# Check if Docker image exists
+#######################################
+image_exists() {
+  docker image inspect "${IMAGE_NAME}:${IMAGE_TAG}" &>/dev/null
+}
+
+#######################################
+# Build the Docker image
+#######################################
+build_image() {
+  log "Building Docker image ${IMAGE_NAME}:${IMAGE_TAG}..."
+  docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" "$REPO_DIR" || die "Failed to build Docker image"
+  log "Docker image built successfully"
+}
+
+#######################################
+# Check if Chrome CDP is available
+#######################################
+cdp_available() {
+  curl -s --connect-timeout 1 "http://localhost:${CDP_PORT}/json/version" &>/dev/null
+}
+
+#######################################
+# Start Chrome with remote debugging
+#######################################
+start_chrome() {
+  log "Starting Chrome with remote debugging on port ${CDP_PORT}..."
+  "$SCRIPT_DIR/../scripts/start-chrome.sh" || die "Failed to start Chrome"
+}
+
+#######################################
+# Ensure Chrome CDP is available
+#######################################
+ensure_chrome() {
+  if cdp_available; then
+    log "Chrome CDP already available on port ${CDP_PORT}"
+    return 0
+  fi
+
+  start_chrome
+
+  # Wait for CDP to become available (up to 10 seconds)
+  local attempts=0
+  while ! cdp_available && [[ $attempts -lt 20 ]]; do
+    sleep 0.5
+    ((attempts++))
+  done
+
+  if ! cdp_available; then
+    die "Chrome CDP not available after startup attempt"
+  fi
+
+  log "Chrome CDP is ready"
+}
+
+#######################################
+# Detect Ruby version from project
+#######################################
+detect_ruby_version() {
+  local worktree_path="$1"
+
+  # Try .ruby-version first
+  if [[ -f "${worktree_path}/.ruby-version" ]]; then
+    cat "${worktree_path}/.ruby-version" | tr -d '[:space:]'
+    return 0
+  fi
+
+  # Fall back to parsing Gemfile
+  if [[ -f "${worktree_path}/Gemfile" ]]; then
+    grep -E "^ruby ['\"]" "${worktree_path}/Gemfile" 2>/dev/null | \
+      sed -E "s/ruby ['\"]([^'\"]+)['\"].*/\1/" | head -1
+    return 0
+  fi
+
+  # Default fallback
+  echo "3.3.0"
+}
+
+#######################################
+# Run Claude in a new Docker container
+#######################################
+run_in_container() {
+  local container_name="$1"
+  shift
+  local claude_args=("$@")
+
+  local worktree_path
+  worktree_path=$(get_worktree_path)
+  local hash
+  hash=$(path_hash "$worktree_path")
+
+  local ruby_version
+  ruby_version=$(detect_ruby_version "$worktree_path")
+
+  log "Starting container: ${container_name}"
+  log "Worktree: ${worktree_path}"
+  log "Ruby version: ${ruby_version}"
+
+  # Ensure image exists
+  if ! image_exists; then
+    build_image
+  fi
+
+  # Ensure Chrome is running
+  ensure_chrome
+
+  # Volume names for this worktree
+  local home_volume="claude-yolo-${hash}-home"
+  local gems_volume="claude-yolo-${hash}-gems"
+  local node_volume="claude-yolo-${hash}-node"
+  local rbenv_volume="claude-yolo-${hash}-rbenv"
+
+  # Run the container
+  docker run -it --rm \
+    --name "$container_name" \
+    --network=host \
+    -v "${worktree_path}:/workspace" \
+    -v "${home_volume}:/home/claude/.claude" \
+    -v "${gems_volume}:/home/claude/.gems" \
+    -v "${node_volume}:/workspace/node_modules" \
+    -v "${rbenv_volume}:/home/claude/.rbenv/versions" \
+    -e "CHROME_CDP_URL=http://localhost:${CDP_PORT}" \
+    -e "RUBY_VERSION=${ruby_version}" \
+    -e "DB_HOST=localhost" \
+    -e "DB_USERNAME=postgres" \
+    -e "DB_PASSWORD=postgres" \
+    -w /workspace \
+    "${IMAGE_NAME}:${IMAGE_TAG}" \
+    claude --dangerously-skip-permissions "${claude_args[@]}"
+}
+
+#######################################
+# Attach to an existing container
+#######################################
+attach_to_container() {
+  local container_name="$1"
+  shift
+  local claude_args=("$@")
+
+  log "Attaching to existing container: ${container_name}"
+  docker exec -it "$container_name" claude --dangerously-skip-permissions "${claude_args[@]}"
+}
+
+#######################################
+# Main entry point
+#######################################
+main() {
+  local yolo_mode=false
+  local claude_args=()
+
+  # Parse arguments
+  for arg in "$@"; do
+    if [[ "$arg" == "--yolo" ]]; then
+      yolo_mode=true
+    else
+      claude_args+=("$arg")
+    fi
+  done
+
+  if [[ "$yolo_mode" == false ]]; then
+    # Normal mode: pass through to native claude
+    exec claude "${claude_args[@]}"
+  fi
+
+  # YOLO mode: run in Docker container
+  local container_name
+  container_name=$(get_container_name)
+
+  if container_running "$container_name"; then
+    attach_to_container "$container_name" "${claude_args[@]}"
+  else
+    run_in_container "$container_name" "${claude_args[@]}"
+  fi
+}
+
+main "$@"
