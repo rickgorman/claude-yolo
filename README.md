@@ -129,14 +129,16 @@ Each strategy lives in `strategies/<name>/` with:
    git clone git@github.com:rickgorman/claude-yolo.git ~/work/claude-yolo
    ```
 
-2. Update your shell alias:
+2. Add a shell alias to your shell config (`~/.zshrc`, `~/.bashrc`, etc.):
    ```bash
-   alias cc="~/work/claude-yolo/bin/claude-yolo"
+   alias cc="$HOME/work/claude-yolo/bin/claude-yolo"
    ```
+   You can name the alias whatever you want — `cc`, `yolo`, `claude-yolo`, etc.
+   Without `--yolo`, the alias passes through to the native `claude` CLI.
 
 3. Reload your shell:
    ```bash
-   source ~/.zshrc
+   source ~/.zshrc   # or ~/.bashrc
    ```
 
 ## Requirements

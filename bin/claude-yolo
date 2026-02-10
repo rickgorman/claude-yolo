@@ -120,8 +120,10 @@ container_uptime() {
   started_at=$(docker inspect --format '{{.State.StartedAt}}' "$name" 2>/dev/null) || return 1
 
   local start_epoch now_epoch
-  if date -jf "%Y-%m-%dT%H:%M:%S" "$(echo "$started_at" | cut -d. -f1)" +%s &>/dev/null 2>&1; then
-    start_epoch=$(date -jf "%Y-%m-%dT%H:%M:%S" "$(echo "$started_at" | cut -d. -f1)" +%s)
+  local ts
+  ts=$(echo "$started_at" | cut -d. -f1)
+  if date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s &>/dev/null 2>&1; then
+    start_epoch=$(date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s)
   else
     start_epoch=$(date -d "$started_at" +%s 2>/dev/null) || return 1
   fi
@@ -143,9 +145,10 @@ image_age_days() {
   local created_at
   created_at=$(docker inspect --format '{{.Created}}' "${image}:latest" 2>/dev/null) || return 1
 
-  local created_epoch now_epoch
-  if date -jf "%Y-%m-%dT%H:%M:%S" "$(echo "$created_at" | cut -d. -f1)" +%s &>/dev/null 2>&1; then
-    created_epoch=$(date -jf "%Y-%m-%dT%H:%M:%S" "$(echo "$created_at" | cut -d. -f1)" +%s)
+  local ts created_epoch now_epoch
+  ts=$(echo "$created_at" | cut -d. -f1)
+  if date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s &>/dev/null 2>&1; then
+    created_epoch=$(date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s)
   else
     created_epoch=$(date -d "$created_at" +%s 2>/dev/null) || return 1
   fi
