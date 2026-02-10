@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Entrypoint script for claude-yolo container
-# Handles Ruby version installation and environment setup
+# Rails entrypoint for claude-yolo container
+# Installs the correct Ruby version and runs bundle install
 
 set -euo pipefail
 
 log() {
-  echo "[entrypoint] $*" >&2
+  echo "[entrypoint:rails] $*" >&2
 }
 
 # Initialize rbenv
@@ -15,7 +15,7 @@ eval "$(rbenv init -)"
 # Install Ruby if RUBY_VERSION is set and not already installed
 if [[ -n "${RUBY_VERSION:-}" ]]; then
   if ! rbenv versions --bare | grep -q "^${RUBY_VERSION}$"; then
-    log "Installing Ruby ${RUBY_VERSION}..."
+    log "Installing Ruby ${RUBY_VERSION} (this may take a few minutes on first run)..."
     rbenv install "$RUBY_VERSION"
   fi
   rbenv global "$RUBY_VERSION"
@@ -36,5 +36,4 @@ if [[ -f /workspace/Gemfile ]]; then
   fi
 fi
 
-# Execute the command passed to the container
 exec "$@"
