@@ -150,4 +150,4 @@ Each strategy lives in `strategies/<name>/` with:
 
 ## License
 
-Private repository - not for redistribution.
+[MIT](LICENSE)
