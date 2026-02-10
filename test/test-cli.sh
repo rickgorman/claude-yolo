@@ -17,7 +17,7 @@ CLI="$REPO_DIR/bin/claude-yolo"
 STRATEGIES_DIR="$REPO_DIR/strategies"
 
 # Create a temporary directory for test fixtures
-TMPDIR_BASE=$(mktemp -d)
+TMPDIR_BASE=$(mktemp -d "${TMPDIR:-/tmp}/claude-yolo.XXXXXX")
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
 ########################################

@@ -41,7 +41,7 @@ if [[ -n "$ANDROID_DIR" ]] && { [[ -f "$ANDROID_DIR/app/build.gradle" ]] || [[ -
 fi
 
 # AndroidManifest.xml anywhere in the tree (up to 5 levels deep)
-manifest=$(find "$PROJECT_DIR" -name "AndroidManifest.xml" -maxdepth 5 -print -quit 2>/dev/null || true)
+manifest=$(find "$PROJECT_DIR" -maxdepth 5 -name "AndroidManifest.xml" -print -quit 2>/dev/null || true)
 if [[ -n "$manifest" ]]; then
   CONFIDENCE=$((CONFIDENCE + 25))
   EVIDENCE+=("AndroidManifest.xml")

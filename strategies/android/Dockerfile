@@ -51,9 +51,11 @@ WORKDIR /home/claude
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
-# Download and install Android SDK command-line tools
-RUN curl -L "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
-        -o /tmp/cmdline-tools.zip \
+# Download and install Android SDK command-line tools (with SHA256 verification)
+ENV ANDROID_SDK_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+ENV ANDROID_SDK_TOOLS_SHA256="2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258"
+RUN curl -L "$ANDROID_SDK_TOOLS_URL" -o /tmp/cmdline-tools.zip \
+    && echo "$ANDROID_SDK_TOOLS_SHA256  /tmp/cmdline-tools.zip" | sha256sum -c - \
     && unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools-extract \
     && mkdir -p /home/claude/android-sdk/cmdline-tools/latest \
     && mv /tmp/cmdline-tools-extract/cmdline-tools/* /home/claude/android-sdk/cmdline-tools/latest/ \
