@@ -23,6 +23,25 @@ When you pass `--yolo`, the script:
 
 Without `--yolo`, it passes through to the native `claude` command.
 
+## Installation
+
+1. Clone this repo:
+   ```bash
+   git clone git@github.com:rickgorman/claude-yolo.git ~/work/claude-yolo
+   ```
+
+2. Add a shell alias to your shell config (`~/.zshrc`, `~/.bashrc`, etc.):
+   ```bash
+   alias cc="$HOME/work/claude-yolo/bin/claude-yolo"
+   ```
+   You can name the alias whatever you want — `cc`, `yolo`, `claude-yolo`, etc.
+   Without `--yolo`, the alias passes through to the native `claude` CLI.
+
+3. Reload your shell:
+   ```bash
+   source ~/.zshrc   # or ~/.bashrc
+   ```
+
 ## Supported Environments
 
 ### Rails
@@ -121,25 +140,6 @@ Each strategy lives in `strategies/<name>/` with:
 | `Dockerfile` | Container setup with language runtime, tools, and Claude Code |
 | `entrypoint.sh` | Dependency installation and env setup, ends with `exec "$@"` |
 | `platform` | *(optional)* Required Docker platform, e.g. `linux/amd64` |
-
-## Installation
-
-1. Clone this repo:
-   ```bash
-   git clone git@github.com:rickgorman/claude-yolo.git ~/work/claude-yolo
-   ```
-
-2. Add a shell alias to your shell config (`~/.zshrc`, `~/.bashrc`, etc.):
-   ```bash
-   alias cc="$HOME/work/claude-yolo/bin/claude-yolo"
-   ```
-   You can name the alias whatever you want — `cc`, `yolo`, `claude-yolo`, etc.
-   Without `--yolo`, the alias passes through to the native `claude` CLI.
-
-3. Reload your shell:
-   ```bash
-   source ~/.zshrc   # or ~/.bashrc
-   ```
 
 ## Requirements
 
