@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Rails entrypoint for claude-yolo container
-# Installs the correct Ruby version and runs bundle install
+# Runs as root to fix volume permissions, then drops to claude user
 
 set -euo pipefail
 
 log() {
   echo "[entrypoint:rails] $*" >&2
 }
+
+# Fix ownership on Docker volumes (created as root by default)
+if [[ "$(id -u)" == "0" ]]; then
+  chown -R claude:claude /home/claude/.rbenv/versions /home/claude/.gems /home/claude/.claude 2>/dev/null || true
+  exec gosu claude "$0" "$@"
+fi
 
 # Initialize rbenv
 export PATH="$HOME/.rbenv/bin:$HOME/.rbenv/shims:$PATH"
