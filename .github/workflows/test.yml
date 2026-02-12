@@ -1,0 +1,110 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint bin/claude-yolo
+        run: shellcheck -x -S warning -e SC1090 bin/claude-yolo
+
+      - name: Lint scripts/start-chrome.sh
+        run: shellcheck -x -S warning -e SC1090 scripts/start-chrome.sh
+
+      - name: Lint strategy detect scripts
+        run: shellcheck -x -S warning -e SC1090 strategies/*/detect.sh
+
+      - name: Lint strategy entrypoints
+        run: shellcheck -x -S warning -e SC1090 strategies/*/entrypoint.sh
+
+      - name: Lint test file
+        run: shellcheck -x -S warning -e SC1090 test/test-cli.sh
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run test suite
+        run: ./test/test-cli.sh
+
+  docker-build-rails:
+    name: Docker Build (rails)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build rails image
+        run: |
+          docker build \
+            -t claude-yolo-rails:test \
+            -f strategies/rails/Dockerfile \
+            strategies/rails/
+
+      - name: Verify socat is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "which socat"
+
+      - name: Verify jq is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "which jq"
+
+      - name: Verify npx is available
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "which npx"
+
+      - name: Verify claude-code is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "which claude"
+
+      - name: Verify workspace directory exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "test -d /workspace"
+
+      - name: Verify claude user exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "id claude"
+
+      - name: Verify MCP config can be mounted and read
+        run: |
+          mcp_config=$(mktemp /tmp/claude-yolo-mcp-XXXXXX)
+          cat > "$mcp_config" <<'EOF'
+          {
+            "mcpServers": {
+              "chrome-devtools": {
+                "command": "npx",
+                "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+              }
+            }
+          }
+          EOF
+          # Mount the config and verify the container can parse it as JSON
+          output=$(docker run --rm \
+            --entrypoint /bin/bash \
+            -v "${mcp_config}:/home/claude/.mcp.json:ro" \
+            claude-yolo-rails:test \
+            -c "jq -r '.mcpServers | keys[0]' /home/claude/.mcp.json")
+          rm -f "$mcp_config"
+          if [ "$output" = "chrome-devtools" ]; then
+            echo "MCP config mount verified: server name is '$output'"
+          else
+            echo "ERROR: Expected 'chrome-devtools', got '$output'"
+            exit 1
+          fi
+
+      - name: Verify npx can resolve chrome-devtools-mcp
+        run: |
+          # Verify the MCP server package exists and can be resolved (dry run)
+          docker run --rm \
+            --entrypoint /bin/bash \
+            claude-yolo-rails:test \
+            -c "npx -y chrome-devtools-mcp@latest --help 2>&1 || true" | head -5

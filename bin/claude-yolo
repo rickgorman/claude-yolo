@@ -3,13 +3,14 @@
 # claude-yolo: Run Claude Code in an isolated Docker container with --dangerously-skip-permissions
 #
 # Usage:
-#   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [claude args...]
+#   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome] [claude args...]
 #
 # Flags:
 #   --yolo              Run in Docker container with full permission bypass
 #   --strategy <name>   Skip auto-detection, use specified strategy (rails, android, ...)
 #   --build             Force rebuild the Docker image before running
 #   --verbose           Show raw Docker build output instead of spinner
+#   --chrome            Enable Chrome DevTools MCP server for browser control
 #
 # Without --yolo, passes through to the native claude command.
 
@@ -555,15 +556,13 @@ run_with_strategy() {
         -v "${gems_volume}:/home/claude/.gems"
         -v "${rbenv_volume}:/home/claude/.rbenv/versions"
         -e "RUBY_VERSION=${ruby_version}"
-        -e "DB_HOST=localhost"
+        -e "DB_HOST=host.docker.internal"
         -e "DB_USERNAME=postgres"
         -e "DB_PASSWORD=postgres"
       )
 
-      ensure_chrome
-
       info "Worktree  ${display_worktree}"
-      info "Ruby ${ruby_version} · Postgres · Chrome CDP"
+      info "Ruby ${ruby_version} · Postgres"
       ;;
 
     android)
@@ -586,6 +585,26 @@ run_with_strategy() {
       info "Worktree  ${display_worktree}"
       ;;
   esac
+
+  # Chrome CDP MCP server
+  if [[ "$chrome_mode" == true ]]; then
+    ensure_chrome
+
+    local mcp_config
+    mcp_config=$(mktemp /tmp/claude-yolo-mcp-XXXXXX)
+    cat > "$mcp_config" <<'MCPEOF'
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+    }
+  }
+}
+MCPEOF
+    docker_args+=(-v "${mcp_config}:/home/claude/.mcp.json:ro")
+    info "Chrome CDP  ${DIM}MCP: chrome-devtools${RESET}"
+  fi
 
   dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
 
@@ -630,6 +649,7 @@ main() {
   local force_build=false
   local force_strategy=""
   local verbose=false
+  local chrome_mode=false
   local claude_args=()
 
   while [[ $# -gt 0 ]]; do
@@ -649,6 +669,10 @@ main() {
         ;;
       --verbose)
         verbose=true
+        shift
+        ;;
+      --chrome)
+        chrome_mode=true
         shift
         ;;
       *)
