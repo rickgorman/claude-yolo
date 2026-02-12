@@ -75,7 +75,7 @@ main() {
   local attempts=0
   while ! cdp_running && [[ $attempts -lt 20 ]]; do
     sleep 0.5
-    ((attempts++))
+    attempts=$((attempts + 1))
   done
 
   if cdp_running; then

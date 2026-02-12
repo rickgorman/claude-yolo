@@ -542,6 +542,11 @@ run_with_strategy() {
     docker_args+=(-v "${HOME}/.claude/CLAUDE.md:/home/claude/.claude/CLAUDE.md:ro")
   fi
 
+  # Mount host commands read-only
+  if [[ -d "${HOME}/.claude/commands" ]]; then
+    docker_args+=(-v "${HOME}/.claude/commands:/home/claude/.claude/commands:ro")
+  fi
+
   # Strategy-specific volumes and env vars
   local display_worktree="${worktree_path/#$HOME/\~}"
   case "$strategy" in
@@ -555,7 +560,7 @@ run_with_strategy() {
         -v "${gems_volume}:/home/claude/.gems"
         -v "${rbenv_volume}:/home/claude/.rbenv/versions"
         -e "RUBY_VERSION=${ruby_version}"
-        -e "DB_HOST=localhost"
+        -e "DB_HOST=host.docker.internal"
         -e "DB_USERNAME=postgres"
         -e "DB_PASSWORD=postgres"
       )

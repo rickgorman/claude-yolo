@@ -615,6 +615,74 @@ assert_contains "Shows Launching message" "$output" "Launching Claude Code"
 assert_contains "Shows footer" "$output" "└"
 
 ########################################
+# Tests: Rails strategy — DB_HOST
+########################################
+
+section "Rails strategy — DB_HOST and commands mount"
+
+# Create a mock docker binary that logs args to a file
+MOCK_BIN="$TMPDIR_BASE/mock-bin"
+DOCKER_LOG="$TMPDIR_BASE/docker-run-args.log"
+mkdir -p "$MOCK_BIN"
+cat > "$MOCK_BIN/docker" << 'MOCKEOF'
+#!/usr/bin/env bash
+case "$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "$*" > "$DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+# Create a mock curl that always succeeds (for CDP check)
+cat > "$MOCK_BIN/curl" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/curl"
+
+# Set up fake HOME with commands directory
+FAKE_HOME="$TMPDIR_BASE/fake-claude-home"
+mkdir -p "$FAKE_HOME/.claude/commands"
+echo "test" > "$FAKE_HOME/.claude/commands/test.md"
+
+output=$(cd "$RAILS_DIR" && \
+  HOME="$FAKE_HOME" \
+  DOCKER_LOG="$DOCKER_LOG" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+
+docker_args=$(cat "$DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_contains "Rails sets DB_HOST to host.docker.internal" "$docker_args" "DB_HOST=host.docker.internal"
+assert_not_contains "Rails does not use DB_HOST=localhost" "$docker_args" "DB_HOST=localhost"
+assert_contains "Mounts commands directory read-only" "$docker_args" ".claude/commands:/home/claude/.claude/commands:ro"
+
+########################################
+# Tests: start-chrome.sh arithmetic safety
+########################################
+
+section "start-chrome.sh arithmetic under set -e"
+
+output=$(bash -c '
+  set -euo pipefail
+  attempts=0
+  attempts=$((attempts + 1))
+  echo "survived: $attempts"
+' 2>&1)
+
+assert_eq "Arithmetic increment survives set -e" "survived: 1" "$output"
+
+# Verify the script uses safe arithmetic (not ((attempts++)))
+chrome_script=$(cat "$REPO_DIR/scripts/start-chrome.sh")
+assert_not_contains "start-chrome.sh avoids ((attempts++))" "$chrome_script" '((attempts++))'
+assert_contains "start-chrome.sh uses safe arithmetic" "$chrome_script" 'attempts=$((attempts + 1))'
+
+########################################
 # Tests: Color suppression when piped
 ########################################
 
