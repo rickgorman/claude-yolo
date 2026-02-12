@@ -19,7 +19,8 @@ When you pass `--yolo`, the script:
    - Host network access (for Postgres, Chrome CDP, ADB, etc.)
    - Your project mounted at `/workspace`
    - Persistent volumes for dependencies and Claude auth
-4. Runs `claude --dangerously-skip-permissions` inside the container
+4. Bind-mounts `~/.claude/CLAUDE.md` and `~/.claude/commands/` read-only so your slash commands are available inside the container
+5. Runs `claude --dangerously-skip-permissions` inside the container
 
 Without `--yolo`, it passes through to the native `claude` command.
 
@@ -106,6 +107,7 @@ to have it build a new strategy for your project type.
 │  │  Mounts:                                    │    │
 │  │   - /workspace (bind: worktree path)        │    │
 │  │   - ~/.claude (named volume for auth)       │    │
+│  │   - ~/.claude/commands (bind: read-only)    │    │
 │  │   - strategy-specific dep caches            │    │
 │  └─────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────┘
