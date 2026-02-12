@@ -486,8 +486,17 @@ assert_contains "Prompt mentions description file" "$output" "description"
 
 section "CLI integration — docker not installed"
 
-# Use a restricted PATH that has bash/coreutils but not docker
-output=$(env PATH="/usr/bin:/bin" bash "$CLI" --yolo 2>&1 || true)
+# Override 'command' so that 'command -v docker' fails, simulating docker not installed
+output=$(bash -c '
+  command() {
+    if [[ "$1" == "-v" && "$2" == "docker" ]]; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+  export -f command
+  bash "'"$CLI"'" --yolo 2>&1
+' 2>&1 || true)
 
 assert_contains "Shows error when docker missing" "$output" "Docker is not installed"
 assert_contains "Error uses styled glyph" "$output" "✘"
@@ -626,6 +635,283 @@ if echo "$output" | grep -qP '\033\[' 2>/dev/null || echo "$output" | grep -q $'
 else
   pass "No ANSI codes when stderr is not a TTY"
 fi
+
+########################################
+# Tests: --chrome flag parsing
+########################################
+
+# Helper: standard docker + exec mock for chrome tests
+# Overrides both docker (for API calls) and exec (to capture final docker run args)
+_chrome_mock_prefix='
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image)
+        shift
+        case "$1" in
+          inspect) return 0 ;;
+          *) return 1 ;;
+        esac
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+'
+
+section "--chrome flag parsing"
+
+# --chrome with --yolo --strategy rails: should produce Chrome CDP output
+output_chrome=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --chrome --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "--chrome shows Chrome CDP info" "$output_chrome" "Chrome CDP"
+assert_contains "--chrome shows MCP server name" "$output_chrome" "chrome-devtools"
+
+# --yolo --strategy rails WITHOUT --chrome: should NOT have Chrome CDP MCP info
+output_no_chrome=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_not_contains "Without --chrome, no MCP server info" "$output_no_chrome" "chrome-devtools"
+
+########################################
+# Tests: --chrome MCP config volume mount
+########################################
+
+section "--chrome MCP config volume mount"
+
+# Extract the exec'd docker run command and verify .mcp.json mount
+exec_cmd_line=$(echo "$output_chrome" | grep "EXEC_CMD:" || true)
+
+assert_contains "Docker args include .mcp.json mount" "$exec_cmd_line" ".mcp.json:ro"
+assert_contains "Docker args mount to /home/claude/.mcp.json" "$exec_cmd_line" "/home/claude/.mcp.json"
+
+# Without --chrome, docker args should NOT include .mcp.json mount
+exec_cmd_no_chrome=$(echo "$output_no_chrome" | grep "EXEC_CMD:" || true)
+
+assert_not_contains "Without --chrome, no .mcp.json mount" "$exec_cmd_no_chrome" ".mcp.json"
+
+########################################
+# Tests: --chrome docker run args structure
+########################################
+
+section "--chrome docker run args structure"
+
+# Verify the exec'd command is a proper docker run with expected flags
+assert_contains "Exec'd command starts with docker" "$exec_cmd_line" "docker run"
+assert_contains "Docker run includes --network=host" "$exec_cmd_line" "--network=host"
+assert_contains "Docker run includes --dangerously-skip-permissions" "$exec_cmd_line" "--dangerously-skip-permissions"
+assert_contains "Docker run uses rails image" "$exec_cmd_line" "claude-yolo-rails"
+
+########################################
+# Tests: --chrome MCP config content
+########################################
+
+section "--chrome MCP config content"
+
+# Generate the same MCP config the CLI generates and validate it
+mcp_test_config="$TMPDIR_BASE/mcp-config-test.json"
+cat > "$mcp_test_config" <<'MCPEOF'
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+    }
+  }
+}
+MCPEOF
+
+# Validate JSON structure
+if command -v jq &>/dev/null; then
+  if jq . "$mcp_test_config" &>/dev/null; then
+    pass "MCP config is valid JSON"
+  else
+    fail "MCP config is not valid JSON"
+  fi
+
+  server_name=$(jq -r '.mcpServers | keys[0]' "$mcp_test_config")
+  assert_eq "MCP server name is chrome-devtools" "chrome-devtools" "$server_name"
+
+  server_cmd=$(jq -r '.mcpServers["chrome-devtools"].command' "$mcp_test_config")
+  assert_eq "MCP server command is npx" "npx" "$server_cmd"
+
+  first_arg=$(jq -r '.mcpServers["chrome-devtools"].args[0]' "$mcp_test_config")
+  assert_eq "MCP server first arg is -y" "-y" "$first_arg"
+
+  pkg_arg=$(jq -r '.mcpServers["chrome-devtools"].args[1]' "$mcp_test_config")
+  assert_contains "MCP server package is chrome-devtools-mcp" "$pkg_arg" "chrome-devtools-mcp"
+
+  url_arg=$(jq -r '.mcpServers["chrome-devtools"].args[2]' "$mcp_test_config")
+  assert_eq "MCP server points to localhost:9222" "--browser-url=http://localhost:9222" "$url_arg"
+
+  num_servers=$(jq '.mcpServers | length' "$mcp_test_config")
+  assert_eq "MCP config has exactly one server" "1" "$num_servers"
+
+  num_args=$(jq '.mcpServers["chrome-devtools"].args | length' "$mcp_test_config")
+  assert_eq "MCP server has exactly three args" "3" "$num_args"
+else
+  # Fallback: validate with grep if jq is not available
+  content=$(cat "$mcp_test_config")
+  assert_contains "MCP config has mcpServers key" "$content" '"mcpServers"'
+  assert_contains "MCP config has chrome-devtools server" "$content" '"chrome-devtools"'
+  assert_contains "MCP config uses npx" "$content" '"command": "npx"'
+  assert_contains "MCP config targets localhost:9222" "$content" "localhost:9222"
+fi
+
+rm -f "$mcp_test_config"
+
+########################################
+# Tests: --chrome temp file is created
+########################################
+
+section "--chrome temp file creation"
+
+# Verify the mounted MCP config path follows the expected pattern
+mcp_mount_arg=$(echo "$exec_cmd_line" | tr ' ' '\n' | grep '.mcp.json' || true)
+assert_match "MCP mount uses /tmp temp file" "$mcp_mount_arg" '/tmp/claude-yolo-mcp-[a-zA-Z0-9]+'
+assert_contains "MCP mount target is /home/claude/.mcp.json" "$mcp_mount_arg" ":/home/claude/.mcp.json:ro"
+
+########################################
+# Tests: --chrome with multiple strategies
+########################################
+
+section "--chrome with Android strategy"
+
+# --chrome should work with any strategy, not just rails
+output_android=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$ANDROID_DIR"'"
+  bash "'"$CLI"'" --yolo --chrome --strategy android 2>&1
+' 2>&1 || true)
+
+assert_contains "--chrome works with android strategy" "$output_android" "Chrome CDP"
+assert_contains "--chrome with android shows MCP server" "$output_android" "chrome-devtools"
+android_exec_cmd=$(echo "$output_android" | grep "EXEC_CMD:" || true)
+assert_contains "Android --chrome has .mcp.json mount" "$android_exec_cmd" ".mcp.json:ro"
+assert_contains "Android docker run uses android image" "$android_exec_cmd" "claude-yolo-android"
+
+########################################
+# Tests: --chrome ensure_chrome is called
+########################################
+
+section "--chrome calls ensure_chrome"
+
+# If curl (CDP check) fails and start-chrome.sh is missing/fails, --chrome should error
+output_no_cdp=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  # curl fails = CDP not available
+  curl() { return 1; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --chrome --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "--chrome with no CDP shows Chrome failure" "$output_no_cdp" "Failed to start Chrome"
+
+# Verify NO .mcp.json mount when Chrome fails (script exits before reaching mount)
+exec_cmd_failed=$(echo "$output_no_cdp" | grep "EXEC_CMD:" || true)
+assert_eq "--chrome failure prevents docker run" "" "$exec_cmd_failed"
+
+########################################
+# Tests: --chrome without --yolo
+########################################
+
+section "--chrome without --yolo"
+
+# Without --yolo, --chrome is consumed by the parser but has no effect
+# The script falls through to exec claude (which will fail since claude isn't mocked)
+output_no_yolo=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --chrome 2>&1
+' 2>&1 || true)
+
+# Should NOT show Docker/chrome output (no yolo mode means no container)
+assert_not_contains "--chrome without --yolo has no Chrome CDP" "$output_no_yolo" "Chrome CDP"
+assert_not_contains "--chrome without --yolo has no header" "$output_no_yolo" "claude·yolo"
+
+########################################
+# Tests: --chrome flag order independence
+########################################
+
+section "--chrome flag order independence"
+
+# --chrome before --yolo
+output_order1=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --chrome --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "--chrome before --yolo works" "$output_order1" "Chrome CDP"
+order1_exec=$(echo "$output_order1" | grep "EXEC_CMD:" || true)
+assert_contains "--chrome before --yolo has mount" "$order1_exec" ".mcp.json:ro"
+
+# --chrome after --strategy
+output_order2=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails --chrome 2>&1
+' 2>&1 || true)
+
+assert_contains "--chrome after --strategy works" "$output_order2" "Chrome CDP"
+order2_exec=$(echo "$output_order2" | grep "EXEC_CMD:" || true)
+assert_contains "--chrome after --strategy has mount" "$order2_exec" ".mcp.json:ro"
+
+# --chrome between other flags
+output_order3=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() { return 0; }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --chrome --strategy rails --verbose 2>&1
+' 2>&1 || true)
+
+assert_contains "--chrome between flags works" "$output_order3" "Chrome CDP"
+
+########################################
+# Tests: Dockerfile socat presence
+########################################
+
+section "Dockerfile socat"
+
+rails_dockerfile=$(cat "$STRATEGIES_DIR/rails/Dockerfile")
+assert_contains "Rails Dockerfile installs socat" "$rails_dockerfile" "socat"
+
+########################################
+# Tests: Rails display without Chrome CDP
+########################################
+
+section "Rails display without --chrome"
+
+# Rails info line should show Ruby + Postgres but NOT Chrome CDP
+assert_contains "Rails output shows Ruby" "$output_no_chrome" "Ruby"
+assert_contains "Rails output shows Postgres" "$output_no_chrome" "Postgres"
+assert_not_contains "Rails output without --chrome omits Chrome CDP" "$output_no_chrome" "Chrome CDP"
 
 ########################################
 # Summary
