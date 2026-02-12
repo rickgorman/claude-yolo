@@ -486,8 +486,17 @@ assert_contains "Prompt mentions description file" "$output" "description"
 
 section "CLI integration — docker not installed"
 
-# Use a restricted PATH that has bash/coreutils but not docker
-output=$(env PATH="/usr/bin:/bin" bash "$CLI" --yolo 2>&1 || true)
+# Override 'command' so that 'command -v docker' fails, simulating docker not installed
+output=$(bash -c '
+  command() {
+    if [[ "$1" == "-v" && "$2" == "docker" ]]; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+  export -f command
+  bash "'"$CLI"'" --yolo 2>&1
+' 2>&1 || true)
 
 assert_contains "Shows error when docker missing" "$output" "Docker is not installed"
 assert_contains "Error uses styled glyph" "$output" "✘"
