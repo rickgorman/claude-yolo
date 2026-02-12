@@ -2,13 +2,6 @@
 
 Run Claude Code in an isolated Docker container with `--dangerously-skip-permissions`.
 
-## Quick Start
-
-```bash
-# In any supported project
-cc --yolo
-```
-
 ## What it does
 
 When you pass `--yolo`, the script:
@@ -19,7 +12,7 @@ When you pass `--yolo`, the script:
    - Host network access (for Postgres, Chrome CDP, ADB, etc.)
    - Your project mounted at `/workspace`
    - Persistent volumes for dependencies and Claude auth
-4. Bind-mounts `~/.claude/CLAUDE.md` and `~/.claude/commands/` read-only so your slash commands are available inside the container
+4. Bind-mounts `~/.claude/CLAUDE.md` and `~/.claude/commands/` read-only so your global instructions and slash commands are available inside the container
 5. Runs `claude --dangerously-skip-permissions` inside the container
 
 Without `--yolo`, it passes through to the native `claude` command.
@@ -43,6 +36,37 @@ Without `--yolo`, it passes through to the native `claude` command.
    source ~/.zshrc   # or ~/.bashrc
    ```
 
+## Quick Start
+
+```bash
+cd your-project/
+
+# Auto-detect environment and launch
+cc --yolo
+
+# Skip detection, use a specific strategy
+cc --yolo --strategy rails
+
+# Force rebuild the Docker image
+cc --yolo --build
+
+# Enable Chrome DevTools MCP for browser automation
+cc --yolo --chrome
+
+# Show raw Docker build output instead of the spinner
+cc --yolo --verbose
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--yolo` | Run in Docker container with full permission bypass |
+| `--strategy <name>` | Skip auto-detection, use the specified strategy (rails, android, ...) |
+| `--build` | Force rebuild the Docker image before running |
+| `--verbose` | Show raw Docker build output instead of the spinner |
+| `--chrome` | Launch Chrome on the host and inject a `chrome-devtools` MCP server into the container |
+
 ## Supported Environments
 
 ### Rails
@@ -52,8 +76,9 @@ Detected by: `Gemfile` with rails, `config/application.rb`, `.ruby-version`, `bi
 Container includes:
 - Ruby (auto-detected version, installed via rbenv)
 - Node.js 20 + Yarn
-- PostgreSQL client (expects Postgres on host)
-- Chrome CDP support (starts Chrome on host for browser automation)
+- PostgreSQL client (`DB_HOST` defaults to `host.docker.internal`)
+- GitHub CLI
+- Chrome CDP support (with `--chrome`, starts Chrome on host for browser automation)
 
 ### Android
 
@@ -113,16 +138,6 @@ to have it build a new strategy for your project type.
 └─────────────────────────────────────────────────────┘
 ```
 
-## Flags
-
-```
-cc --yolo                        # Auto-detect environment
-cc --yolo --strategy rails       # Skip detection, use Rails
-cc --yolo --strategy android     # Skip detection, use Android
-cc --yolo --build                # Force rebuild the Docker image
-cc --yolo --build --strategy android   # Rebuild a specific image
-```
-
 ## Container Naming
 
 Each git worktree + strategy combination gets its own container and volumes:
@@ -146,7 +161,7 @@ Each strategy lives in `strategies/<name>/` with:
 ## Requirements
 
 - Docker
-- Chrome (for CDP support, used by Rails strategy)
+- Chrome (only needed with `--chrome` flag)
 - PostgreSQL on localhost:5432 (for Rails)
 - Android device with wireless debugging (for Android)
 
