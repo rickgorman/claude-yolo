@@ -436,7 +436,7 @@ build_strategy_image() {
     "${build_cmd[@]}" || { fail "Build failed"; exit 1; }
   else
     local logfile
-    logfile=$(mktemp /tmp/claude-yolo-build.XXXXXX.log)
+    logfile=$(mktemp /tmp/claude-yolo-build-XXXXXX)
 
     local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local build_start
