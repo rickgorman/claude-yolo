@@ -28,8 +28,8 @@ jobs:
       - name: Lint strategy entrypoints
         run: shellcheck -x -S warning -e SC1090 strategies/*/entrypoint.sh
 
-      - name: Lint test file
-        run: shellcheck -x -S warning -e SC1090 test/test-cli.sh
+      - name: Lint test files
+        run: shellcheck -x -S warning -e SC1090 test/test-cli.sh test/test-chrome-e2e.sh
 
   unit-tests:
     name: Unit Tests
@@ -108,3 +108,13 @@ jobs:
             --entrypoint /bin/bash \
             claude-yolo-rails:test \
             -c "npx -y chrome-devtools-mcp@latest --help 2>&1 || true" | head -5
+
+  chrome-e2e:
+    name: Chrome CDP E2E
+    runs-on: ubuntu-latest
+    needs: docker-build-rails
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Chrome CDP end-to-end tests
+        run: ./test/test-chrome-e2e.sh
