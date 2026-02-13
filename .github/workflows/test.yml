@@ -29,7 +29,7 @@ jobs:
         run: shellcheck -x -S warning -e SC1090 strategies/*/entrypoint.sh
 
       - name: Lint test files
-        run: shellcheck -x -S warning -e SC1090 test/test-cli.sh test/test-chrome-e2e.sh
+        run: shellcheck -x -S warning -e SC1090 test/test-cli.sh test/test-chrome-e2e.sh test/test-chrome-multi.sh
 
   unit-tests:
     name: Unit Tests
@@ -223,3 +223,12 @@ jobs:
 
       - name: Run Chrome CDP end-to-end tests
         run: ./test/test-chrome-e2e.sh
+
+  chrome-multi-e2e:
+    name: Chrome Multi-Instance Isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Chrome multi-instance isolation tests
+        run: ./test/test-chrome-multi.sh

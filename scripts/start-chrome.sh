@@ -49,8 +49,8 @@ main() {
   echo "[start-chrome] Starting Chrome with remote debugging on port ${CDP_PORT}..." >&2
 
   # Start Chrome in background with remote debugging
-  # Using a unique user data dir to avoid conflicts with existing Chrome instances
-  local user_data_dir="${HOME}/.claude-yolo-chrome"
+  # Using a unique user data dir per CDP port to avoid conflicts between worktrees
+  local user_data_dir="${CHROME_USER_DATA_DIR:-${HOME}/.claude-yolo-chrome-${CDP_PORT}}"
   mkdir -p "$user_data_dir"
 
   "$chrome_path" \
