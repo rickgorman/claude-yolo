@@ -679,7 +679,7 @@ attach_to_container() {
   dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
   success "Attaching"
   footer
-  exec docker exec -it "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
+  exec docker exec -it --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
 }
 
 ########################################
