@@ -67,6 +67,25 @@ cc --yolo --verbose
 | `--verbose` | Show raw Docker build output instead of the spinner |
 | `--chrome` | Launch Chrome on the host and inject a `chrome-devtools` MCP server into the container |
 
+## GitHub Token
+
+In `--yolo` mode, claude-yolo requires a valid GitHub token so that `gh` works inside the container. It searches these locations in order:
+
+1. `GH_TOKEN` environment variable
+2. `GITHUB_TOKEN` environment variable
+3. `.env` file in the project directory
+4. `~/.env`
+5. `~/.config/gh/hosts.yml` (written by `gh auth login`)
+
+The token is validated against `api.github.com/user` before launching the container.
+
+If you don't use GitHub, skip this check:
+
+```bash
+export CLAUDE_YOLO_NO_GITHUB=1
+cc --yolo
+```
+
 ## Supported Environments
 
 ### Rails

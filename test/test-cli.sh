@@ -1348,6 +1348,7 @@ output_no_token=$(bash -c '
 assert_contains "Missing token shows error" "$output_no_token" "GitHub token not found"
 assert_contains "Missing token lists searched locations" "$output_no_token" "GH_TOKEN environment variable"
 assert_contains "Missing token suggests fix" "$output_no_token" "export GH_TOKEN="
+assert_contains "Missing token shows skip hint" "$output_no_token" "CLAUDE_YOLO_NO_GITHUB"
 assert_not_contains "Missing token does not reach docker run" "$output_no_token" "Launching Claude Code"
 
 ########################################
@@ -1388,6 +1389,52 @@ assert_not_contains "Invalid token does not reach docker run" "$output_bad_token
 section "GitHub token output display"
 
 assert_contains "Output shows GitHub token success" "$output_no_chrome" "GitHub token"
+
+########################################
+# Tests: CLAUDE_YOLO_NO_GITHUB override
+########################################
+
+section "CLAUDE_YOLO_NO_GITHUB — skips token check"
+
+output_no_github=$(bash -c '
+  export GH_TOKEN="" GITHUB_TOKEN="" CLAUDE_YOLO_NO_GITHUB=1
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      run) echo "DOCKER_RUN: $*" ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  HOME="'"$EMPTY_HOME"'"
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "Skipped message shown" "$output_no_github" "GitHub token check skipped"
+assert_contains "Skipped message mentions env var" "$output_no_github" "CLAUDE_YOLO_NO_GITHUB"
+assert_not_contains "No token-not-found error" "$output_no_github" "GitHub token not found"
+assert_not_contains "No token-invalid error" "$output_no_github" "GitHub token invalid"
+
+section "CLAUDE_YOLO_NO_GITHUB — no GH_TOKEN in docker args"
+
+assert_not_contains "Docker args omit GH_TOKEN when skipped" "$output_no_github" "GH_TOKEN="
+
+section "CLAUDE_YOLO_NO_GITHUB — unit test on ensure_github_token"
+
+_GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
+skip_output=$(CLAUDE_YOLO_NO_GITHUB=1 GH_TOKEN="" GITHUB_TOKEN="" ensure_github_token "$EMPTY_DIR" 2>&1)
+assert_eq "ensure_github_token returns 0 when skipped" "0" "$?"
+assert_contains "ensure_github_token prints skip message" "$skip_output" "skipped"
+assert_eq "_GITHUB_TOKEN stays empty when skipped" "" "$_GITHUB_TOKEN"
 
 ########################################
 # Summary

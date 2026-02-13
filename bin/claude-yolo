@@ -272,6 +272,11 @@ validate_github_token() {
 ensure_github_token() {
   local worktree_path="$1"
 
+  if [[ -n "${CLAUDE_YOLO_NO_GITHUB:-}" ]]; then
+    dim "GitHub token check skipped (CLAUDE_YOLO_NO_GITHUB)"
+    return 0
+  fi
+
   if ! find_github_token "$worktree_path"; then
     fail "GitHub token not found"
     echo "" >&2
@@ -284,6 +289,9 @@ ensure_github_token() {
     echo "" >&2
     dim "Set one with:"
     dim "  export GH_TOKEN=ghp_your_token_here"
+    echo "" >&2
+    dim "Or skip this check entirely:"
+    dim "  export CLAUDE_YOLO_NO_GITHUB=1"
     exit 1
   fi
 
