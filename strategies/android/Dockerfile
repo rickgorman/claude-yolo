@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     unzip \
     jq \
+    sudo \
     # Java 17 for Android SDK
     openjdk-17-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
@@ -42,7 +43,8 @@ RUN useradd -m -s /bin/bash claude \
     && mkdir -p /home/claude/.claude \
     && mkdir -p /home/claude/android-sdk \
     && mkdir -p /home/claude/.gradle \
-    && chown -R claude:claude /home/claude /workspace
+    && chown -R claude:claude /home/claude /workspace \
+    && echo 'claude ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 USER claude
 WORKDIR /home/claude
