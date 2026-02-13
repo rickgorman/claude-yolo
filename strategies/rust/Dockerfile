@@ -61,7 +61,8 @@ WORKDIR /home/claude
 # Install Rust via rustup
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     --default-toolchain stable \
-    --component clippy rustfmt
+    --component clippy \
+    --component rustfmt
 
 ENV PATH="/home/claude/.cargo/bin:$PATH"
 ENV CARGO_HOME="/home/claude/.cargo"
