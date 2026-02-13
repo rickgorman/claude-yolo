@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Android Development Environment for claude-yolo
 #
 # IMPORTANT: Requires x86_64 — Android SDK build tools (aapt2) are only
@@ -13,7 +14,9 @@ FROM --platform=linux/amd64 ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # System dependencies
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     build-essential \
     git \
     curl \
@@ -24,16 +27,17 @@ RUN apt-get update && apt-get install -y \
     jq \
     sudo \
     # Java 17 for Android SDK
-    openjdk-17-jdk-headless \
-    && rm -rf /var/lib/apt/lists/*
+    openjdk-17-jdk-headless
 
 # Node.js 20 LTS (for Claude Code CLI)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
 
 # Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g @anthropic-ai/claude-code
 
 # Workspace (created as root before user switch)
 RUN mkdir -p /workspace

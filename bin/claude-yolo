@@ -433,7 +433,7 @@ build_strategy_image() {
   info "Building ${BOLD}${image_name}${RESET} (first run, may take a few minutes)"
 
   if [[ "$verbose" == true ]]; then
-    "${build_cmd[@]}" || { fail "Build failed"; exit 1; }
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" || { fail "Build failed"; exit 1; }
   else
     local logfile
     logfile=$(mktemp /tmp/claude-yolo-build-XXXXXX)
@@ -443,7 +443,7 @@ build_strategy_image() {
     build_start=$(date +%s)
     local build_pid
 
-    "${build_cmd[@]}" >"$logfile" 2>&1 &
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" >"$logfile" 2>&1 &
     build_pid=$!
 
     while kill -0 "$build_pid" 2>/dev/null; do
@@ -679,7 +679,7 @@ attach_to_container() {
   dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
   success "Attaching"
   footer
-  exec docker exec -it "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
+  exec docker exec -it --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
 }
 
 ########################################

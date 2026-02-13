@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Rails Development Environment for claude-yolo
 #
 # Based on Debian with Ruby (via rbenv), Node.js, and PostgreSQL client.
@@ -10,7 +11,9 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # System dependencies
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     build-essential \
     autoconf \
     patch \
@@ -36,24 +39,26 @@ RUN apt-get update && apt-get install -y \
     # Tools
     jq \
     unzip \
-    socat \
-    && rm -rf /var/lib/apt/lists/*
+    socat
 
 # Node.js 20 LTS
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
 
 # GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get update && apt-get install -y gh
 
 # Yarn + Claude Code CLI (global installs need root)
-RUN npm install -g yarn @anthropic-ai/claude-code
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g yarn @anthropic-ai/claude-code
 
 # Workspace (created as root before user switch)
 RUN mkdir -p /workspace
@@ -66,7 +71,9 @@ RUN useradd -m -s /bin/bash claude \
     && chown -R claude:claude /home/claude /workspace \
     && echo 'claude ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-RUN apt-get update && apt-get install -y gosu && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y gosu
 
 USER claude
 WORKDIR /home/claude

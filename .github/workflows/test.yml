@@ -49,12 +49,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build rails image
-        run: |
-          docker build \
-            -t claude-yolo-rails:test \
-            -f strategies/rails/Dockerfile \
-            strategies/rails/
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/rails/
+          file: strategies/rails/Dockerfile
+          tags: claude-yolo-rails:test
+          load: true
+          cache-from: type=gha,scope=rails
+          cache-to: type=gha,mode=max,scope=rails
 
       - name: Verify socat is installed
         run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "which socat"
@@ -117,18 +123,42 @@ jobs:
             claude-yolo-rails:test \
             -c "npx -y chrome-devtools-mcp@latest --help 2>&1 || true" | head -5
 
+      - name: Verify docker exec runs as claude user (not root)
+        run: |
+          # Start container in background (entrypoint drops to claude via gosu)
+          docker run -d --name rails-exec-test \
+            --entrypoint /bin/bash \
+            claude-yolo-rails:test \
+            -c "sleep 30"
+          # docker exec defaults to root — verify --user claude works
+          output=$(docker exec --user claude rails-exec-test whoami)
+          docker stop rails-exec-test >/dev/null 2>&1 || true
+          docker rm rails-exec-test >/dev/null 2>&1 || true
+          if [ "$output" = "claude" ]; then
+            echo "docker exec --user claude verified: running as '$output'"
+          else
+            echo "ERROR: Expected 'claude', got '$output'"
+            exit 1
+          fi
+
   docker-build-rust:
     name: Docker Build (rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build rust image
-        run: |
-          docker build \
-            -t claude-yolo-rust:test \
-            -f strategies/rust/Dockerfile \
-            strategies/rust/
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/rust/
+          file: strategies/rust/Dockerfile
+          tags: claude-yolo-rust:test
+          load: true
+          cache-from: type=gha,scope=rust
+          cache-to: type=gha,mode=max,scope=rust
 
       - name: Verify rustc is installed
         run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "rustc --version"
@@ -165,6 +195,24 @@ jobs:
             --entrypoint /bin/bash \
             claude-yolo-rust:test \
             -c "cargo init --name smoke-test /tmp/smoke && cd /tmp/smoke && cargo test 2>&1"
+
+      - name: Verify docker exec runs as claude user (not root)
+        run: |
+          # Start container in background (entrypoint drops to claude via gosu)
+          docker run -d --name rust-exec-test \
+            --entrypoint /bin/bash \
+            claude-yolo-rust:test \
+            -c "sleep 30"
+          # docker exec defaults to root — verify --user claude works
+          output=$(docker exec --user claude rust-exec-test whoami)
+          docker stop rust-exec-test >/dev/null 2>&1 || true
+          docker rm rust-exec-test >/dev/null 2>&1 || true
+          if [ "$output" = "claude" ]; then
+            echo "docker exec --user claude verified: running as '$output'"
+          else
+            echo "ERROR: Expected 'claude', got '$output'"
+            exit 1
+          fi
 
   chrome-e2e:
     name: Chrome CDP E2E
