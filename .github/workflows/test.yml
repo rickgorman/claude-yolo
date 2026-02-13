@@ -109,6 +109,47 @@ jobs:
             claude-yolo-rails:test \
             -c "npx -y chrome-devtools-mcp@latest --help 2>&1 || true" | head -5
 
+  docker-build-rust:
+    name: Docker Build (rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build rust image
+        run: |
+          docker build \
+            -t claude-yolo-rust:test \
+            -f strategies/rust/Dockerfile \
+            strategies/rust/
+
+      - name: Verify rustc is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "rustc --version"
+
+      - name: Verify cargo is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "cargo --version"
+
+      - name: Verify clippy is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "clippy-driver --version"
+
+      - name: Verify rustfmt is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "rustfmt --version"
+
+      - name: Verify claude-code is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "which claude"
+
+      - name: Verify workspace directory exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "test -d /workspace"
+
+      - name: Verify claude user exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "id claude"
+
+      - name: Smoke-test cargo inside container
+        run: |
+          docker run --rm \
+            --entrypoint /bin/bash \
+            claude-yolo-rust:test \
+            -c "cargo init --name smoke-test /tmp/smoke && cd /tmp/smoke && cargo test 2>&1"
+
   chrome-e2e:
     name: Chrome CDP E2E
     runs-on: ubuntu-latest

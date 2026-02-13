@@ -608,6 +608,21 @@ run_with_strategy() {
       fi
       ;;
 
+    rust)
+      local cargo_volume="claude-yolo-${hash}-cargo"
+      local rustup_volume="claude-yolo-${hash}-rustup"
+      local target_volume="claude-yolo-${hash}-target"
+
+      docker_args+=(
+        -v "${cargo_volume}:/home/claude/.cargo"
+        -v "${rustup_volume}:/home/claude/.rustup"
+        -v "${target_volume}:/workspace/target"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Rust · Cargo"
+      ;;
+
     *)
       info "Worktree  ${display_worktree}"
       ;;
