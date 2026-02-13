@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
     gnupg \
+    sudo \
     # Ruby build dependencies
     libssl-dev \
     libreadline-dev \
@@ -62,7 +63,8 @@ RUN useradd -m -s /bin/bash claude \
     && mkdir -p /home/claude/.claude \
     && mkdir -p /home/claude/.gems \
     && mkdir -p /home/claude/.rbenv \
-    && chown -R claude:claude /home/claude /workspace
+    && chown -R claude:claude /home/claude /workspace \
+    && echo 'claude ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 RUN apt-get update && apt-get install -y gosu && rm -rf /var/lib/apt/lists/*
 

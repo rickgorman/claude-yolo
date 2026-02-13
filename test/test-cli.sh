@@ -420,6 +420,28 @@ for strategy_dir in "$STRATEGIES_DIR"/*/; do
 done
 
 ########################################
+# Tests: Dockerfile sudo / apt-get at runtime
+########################################
+
+section "Dockerfile sudo for runtime apt-get"
+
+for strategy_dir in "$STRATEGIES_DIR"/*/; do
+  strategy=$(basename "$strategy_dir")
+  dockerfile="$strategy_dir/Dockerfile"
+  [[ -f "$dockerfile" ]] || continue
+
+  content=$(cat "$dockerfile")
+
+  assert_contains "$strategy: Dockerfile installs sudo" "$content" "sudo"
+
+  if echo "$content" | grep -q 'claude ALL=(ALL) NOPASSWD:ALL'; then
+    pass "$strategy: claude user has passwordless sudo"
+  else
+    fail "$strategy: claude user missing NOPASSWD sudoers entry"
+  fi
+done
+
+########################################
 # Tests: Entrypoint correctness
 ########################################
 

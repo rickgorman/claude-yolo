@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     pkg-config \
+    sudo \
     # Common native library dependencies
     libssl-dev \
     libffi-dev \
@@ -51,7 +52,8 @@ RUN useradd -m -s /bin/bash claude \
     && mkdir -p /home/claude/.claude \
     && mkdir -p /home/claude/.cargo \
     && mkdir -p /home/claude/.rustup \
-    && chown -R claude:claude /home/claude /workspace
+    && chown -R claude:claude /home/claude /workspace \
+    && echo 'claude ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 RUN apt-get update && apt-get install -y gosu && rm -rf /var/lib/apt/lists/*
 
