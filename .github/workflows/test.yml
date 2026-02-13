@@ -49,12 +49,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build rails image
-        run: |
-          docker build \
-            -t claude-yolo-rails:test \
-            -f strategies/rails/Dockerfile \
-            strategies/rails/
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/rails/
+          file: strategies/rails/Dockerfile
+          tags: claude-yolo-rails:test
+          load: true
+          cache-from: type=gha,scope=rails
+          cache-to: type=gha,mode=max,scope=rails
 
       - name: Verify socat is installed
         run: docker run --rm --entrypoint /bin/bash claude-yolo-rails:test -c "which socat"
@@ -123,12 +129,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build rust image
-        run: |
-          docker build \
-            -t claude-yolo-rust:test \
-            -f strategies/rust/Dockerfile \
-            strategies/rust/
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/rust/
+          file: strategies/rust/Dockerfile
+          tags: claude-yolo-rust:test
+          load: true
+          cache-from: type=gha,scope=rust
+          cache-to: type=gha,mode=max,scope=rust
 
       - name: Verify rustc is installed
         run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "rustc --version"
