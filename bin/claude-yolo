@@ -436,7 +436,7 @@ build_strategy_image() {
     "${build_cmd[@]}" || { fail "Build failed"; exit 1; }
   else
     local logfile
-    logfile=$(mktemp /tmp/claude-yolo-build.XXXXXX.log)
+    logfile=$(mktemp /tmp/claude-yolo-build-XXXXXX)
 
     local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local build_start
@@ -509,8 +509,10 @@ run_with_strategy() {
   fi
 
   # Common volumes
-  local home_volume="claude-yolo-${hash}-home"
   local node_volume="claude-yolo-${hash}-node"
+
+  # Ensure host .claude directory exists for bind mount
+  mkdir -p "${HOME}/.claude"
 
   # Remove stopped container with the same name
   docker rm "$container_name" 2>/dev/null || true
@@ -521,7 +523,7 @@ run_with_strategy() {
     --name "$container_name"
     --network=host
     -v "${worktree_path}:/workspace"
-    -v "${home_volume}:/home/claude/.claude"
+    -v "${HOME}/.claude:/home/claude/.claude"
     -v "${node_volume}:/workspace/node_modules"
     -e "CHROME_CDP_URL=http://localhost:${CDP_PORT}"
     -e "TERM=${TERM:-xterm-256color}"
@@ -543,9 +545,29 @@ run_with_strategy() {
     docker_args+=(-v "${HOME}/.claude/CLAUDE.md:/home/claude/.claude/CLAUDE.md:ro")
   fi
 
+  # Mount host settings read-only
+  for settings_file in settings.json settings.local.json; do
+    if [[ -f "${HOME}/.claude/${settings_file}" ]]; then
+      docker_args+=(-v "${HOME}/.claude/${settings_file}:/home/claude/.claude/${settings_file}:ro")
+    fi
+  done
+
   # Mount host commands read-only
   if [[ -d "${HOME}/.claude/commands" ]]; then
     docker_args+=(-v "${HOME}/.claude/commands:/home/claude/.claude/commands:ro")
+  fi
+
+  # If workspace is a git worktree, mount the parent .git directory
+  # so the gitdir path in the .git file resolves inside the container
+  local git_file="${worktree_path}/.git"
+  if [[ -f "$git_file" ]]; then
+    local gitdir_path
+    gitdir_path=$(sed -n 's/^gitdir: //p' "$git_file")
+    if [[ -n "$gitdir_path" ]]; then
+      local parent_git_dir
+      parent_git_dir=$(cd "$worktree_path" && cd "$(dirname "$gitdir_path")" && cd .. && pwd)
+      docker_args+=(-v "${parent_git_dir}:${parent_git_dir}")
+    fi
   fi
 
   # Strategy-specific volumes and env vars

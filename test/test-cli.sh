@@ -464,6 +464,13 @@ for strategy_dir in "$STRATEGIES_DIR"/*/; do
   done < <(grep -n 'grep' "$entrypoint" | grep '|' || true)
 done
 
+section "Rails entrypoint — node_modules"
+
+rails_entrypoint=$(cat "$STRATEGIES_DIR/rails/entrypoint.sh")
+assert_contains "Rails entrypoint chowns node_modules" "$rails_entrypoint" "chown claude:claude /workspace/node_modules"
+assert_contains "Rails entrypoint runs npm install" "$rails_entrypoint" "npm install"
+assert_contains "Rails entrypoint runs yarn install when yarn.lock present" "$rails_entrypoint" "yarn install"
+
 ########################################
 # Tests: generate_unknown_prompt
 ########################################
@@ -654,10 +661,12 @@ exit 0
 MOCKEOF
 chmod +x "$MOCK_BIN/curl"
 
-# Set up fake HOME with commands directory
+# Set up fake HOME with commands directory and settings files
 FAKE_HOME="$TMPDIR_BASE/fake-claude-home"
 mkdir -p "$FAKE_HOME/.claude/commands"
 echo "test" > "$FAKE_HOME/.claude/commands/test.md"
+echo '{}' > "$FAKE_HOME/.claude/settings.json"
+echo '{}' > "$FAKE_HOME/.claude/settings.local.json"
 
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
@@ -670,6 +679,95 @@ docker_args=$(cat "$DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains "Rails sets DB_HOST to host.docker.internal" "$docker_args" "DB_HOST=host.docker.internal"
 assert_not_contains "Rails does not use DB_HOST=localhost" "$docker_args" "DB_HOST=localhost"
 assert_contains "Mounts commands directory read-only" "$docker_args" ".claude/commands:/home/claude/.claude/commands:ro"
+
+########################################
+# Tests: Session history persists to host
+########################################
+
+section "Session history persists to host"
+
+# .claude should be bind-mounted from host, not a named Docker volume
+assert_contains "Bind-mounts host .claude into container" "$docker_args" ".claude:/home/claude/.claude"
+assert_not_contains "Does not use named volume for .claude" "$docker_args" "-home:/home/claude/.claude"
+
+########################################
+# Tests: Settings files mounted read-only
+########################################
+
+section "Settings files mounted read-only"
+
+assert_contains "Mounts settings.json read-only" "$docker_args" "settings.json:/home/claude/.claude/settings.json:ro"
+assert_contains "Mounts settings.local.json read-only" "$docker_args" "settings.local.json:/home/claude/.claude/settings.local.json:ro"
+
+########################################
+# Tests: Git worktree mount
+########################################
+
+section "Git worktree mount"
+
+# Create a fake worktree: a directory whose .git is a file (not a directory)
+WORKTREE_DIR="$TMPDIR_BASE/fake-worktree"
+mkdir -p "$WORKTREE_DIR/config"
+echo "gem 'rails'" > "$WORKTREE_DIR/Gemfile"
+echo "# app" > "$WORKTREE_DIR/config/application.rb"
+echo "3.3.0" > "$WORKTREE_DIR/.ruby-version"
+
+# Simulate the .git file that git worktree creates
+# Points at a fake parent repo .git/worktrees/<name> path
+FAKE_PARENT_GIT="$TMPDIR_BASE/fake-parent-repo/.git"
+mkdir -p "$FAKE_PARENT_GIT/worktrees/my-worktree"
+echo "gitdir: ${FAKE_PARENT_GIT}/worktrees/my-worktree" > "$WORKTREE_DIR/.git"
+
+WORKTREE_DOCKER_LOG="$TMPDIR_BASE/docker-run-worktree.log"
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$WORKTREE_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output=$(cd "$WORKTREE_DIR" && \
+  HOME="$FAKE_HOME" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+
+worktree_docker_args=$(cat "$WORKTREE_DOCKER_LOG" 2>/dev/null || echo "")
+
+# pwd canonicalizes double slashes from $TMPDIR, so resolve the expected path
+expected_parent_git=$(cd "$FAKE_PARENT_GIT" && pwd)
+assert_contains "Worktree mounts parent .git directory" "$worktree_docker_args" "${expected_parent_git}:${expected_parent_git}"
+
+# Verify a non-worktree project does NOT get the extra mount
+NONWT_DOCKER_LOG="$TMPDIR_BASE/docker-run-nonwt.log"
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$NONWT_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output=$(cd "$RAILS_DIR" && \
+  HOME="$FAKE_HOME" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+
+nonwt_docker_args=$(cat "$NONWT_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_not_contains "Non-worktree does not mount parent .git" "$nonwt_docker_args" "fake-parent-repo"
 
 ########################################
 # Tests: start-chrome.sh arithmetic safety

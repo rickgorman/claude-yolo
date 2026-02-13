@@ -11,6 +11,7 @@ log() {
 # Fix ownership on Docker volumes (created as root by default)
 if [[ "$(id -u)" == "0" ]]; then
   chown -R claude:claude /home/claude/.rbenv/versions /home/claude/.gems /home/claude/.claude 2>/dev/null || true
+  chown claude:claude /workspace/node_modules 2>/dev/null || true
   exec gosu claude "$0" "$@"
 fi
 
@@ -39,6 +40,17 @@ if [[ -f /workspace/Gemfile ]]; then
   if ! bundle check &>/dev/null; then
     log "Running bundle install..."
     bundle install --jobs=4 --retry=3
+  fi
+fi
+
+# Install npm packages if package.json exists and node_modules is empty
+if [[ -f /workspace/package.json ]] && [[ -z "$(ls -A /workspace/node_modules 2>/dev/null)" ]]; then
+  if [[ -f /workspace/yarn.lock ]]; then
+    log "Running yarn install..."
+    yarn install --frozen-lockfile 2>/dev/null || yarn install
+  else
+    log "Running npm install..."
+    npm install
   fi
 fi
 
