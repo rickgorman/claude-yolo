@@ -20,9 +20,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 STRATEGIES_DIR="$REPO_DIR/strategies"
 
-# Chrome CDP port for remote debugging
-CDP_PORT=9222
-
 # Stale image threshold (days)
 STALE_IMAGE_DAYS=14
 
@@ -87,6 +84,12 @@ path_hash() {
   else
     echo -n "$1" | shasum | cut -c1-8
   fi
+}
+
+cdp_port_for_hash() {
+  local hash="$1"
+  local dec=$((16#${hash:0:4}))
+  echo $((9222 + dec % 778))
 }
 
 ########################################
@@ -163,26 +166,29 @@ image_age_days() {
 ########################################
 
 cdp_available() {
-  curl -s --connect-timeout 1 "http://localhost:${CDP_PORT}/json/version" &>/dev/null
+  local port="${1:-9222}"
+  curl -s --connect-timeout 1 "http://localhost:${port}/json/version" &>/dev/null
 }
 
 ensure_chrome() {
-  if cdp_available; then
+  local port="${1:-9222}"
+
+  if cdp_available "$port"; then
     return 0
   fi
 
-  "$REPO_DIR/scripts/start-chrome.sh" || {
+  CDP_PORT="$port" "$REPO_DIR/scripts/start-chrome.sh" || {
     fail "Failed to start Chrome"
     exit 1
   }
 
   local attempts=0
-  while ! cdp_available && [[ $attempts -lt 20 ]]; do
+  while ! cdp_available "$port" && [[ $attempts -lt 20 ]]; do
     sleep 0.5
     attempts=$((attempts + 1))
   done
 
-  if ! cdp_available; then
+  if ! cdp_available "$port"; then
     fail "Chrome CDP not available after startup attempt"
     exit 1
   fi
@@ -615,6 +621,8 @@ run_with_strategy() {
   worktree_path=$(get_worktree_path)
   local hash
   hash=$(path_hash "$worktree_path")
+  local cdp_port
+  cdp_port=$(cdp_port_for_hash "$hash")
   local image_name="claude-yolo-${strategy}"
 
   # Ensure image exists
@@ -652,7 +660,7 @@ run_with_strategy() {
     -v "${worktree_path}:/workspace"
     -v "${HOME}/.claude:/home/claude/.claude"
     -v "${node_volume}:/workspace/node_modules"
-    -e "CHROME_CDP_URL=http://localhost:${CDP_PORT}"
+    -e "CHROME_CDP_URL=http://localhost:${cdp_port}"
     -e "TERM=${TERM:-xterm-256color}"
     -e "COLORTERM=${COLORTERM:-}"
     -w /workspace
@@ -765,22 +773,22 @@ run_with_strategy() {
 
   # Chrome CDP MCP server
   if [[ "$chrome_mode" == true ]]; then
-    ensure_chrome
+    ensure_chrome "$cdp_port"
 
     local mcp_config
     mcp_config=$(mktemp /tmp/claude-yolo-mcp-XXXXXX)
-    cat > "$mcp_config" <<'MCPEOF'
+    cat > "$mcp_config" <<MCPEOF
 {
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:${cdp_port}"]
     }
   }
 }
 MCPEOF
     docker_args+=(-v "${mcp_config}:/home/claude/.mcp.json:ro")
-    info "Chrome CDP  ${DIM}MCP: chrome-devtools${RESET}"
+    info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
   fi
 
   dim "→ Ctrl+C to exit │ cc --yolo to reconnect"

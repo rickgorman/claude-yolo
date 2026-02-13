@@ -168,6 +168,47 @@ else
 fi
 
 ########################################
+# Tests: cdp_port_for_hash
+########################################
+
+section "cdp_port_for_hash"
+
+port1=$(cdp_port_for_hash "abcd1234")
+port2=$(cdp_port_for_hash "abcd1234")
+assert_eq "cdp_port_for_hash is deterministic" "$port1" "$port2"
+
+port3=$(cdp_port_for_hash "deadbeef")
+if [[ "$port1" != "$port3" ]]; then
+  pass "cdp_port_for_hash differs for different hashes"
+else
+  fail "cdp_port_for_hash should differ for different hashes (both: $port1)"
+fi
+
+if [[ "$port1" -ge 9222 && "$port1" -le 9999 ]]; then
+  pass "cdp_port_for_hash in range 9222–9999 ($port1)"
+else
+  fail "cdp_port_for_hash out of range ($port1)"
+fi
+
+# Test boundary: 0000 hash → minimum port
+port_min=$(cdp_port_for_hash "00001234")
+assert_eq "cdp_port_for_hash with 0000 prefix gives 9222" "9222" "$port_min"
+
+# Test boundary: ffff hash → 65535 % 778 = 65535 - 84*778 = 65535 - 65352 = 183 → 9222 + 183 = 9405
+port_max=$(cdp_port_for_hash "ffff1234")
+if [[ "$port_max" -ge 9222 && "$port_max" -le 9999 ]]; then
+  pass "cdp_port_for_hash with ffff prefix in range ($port_max)"
+else
+  fail "cdp_port_for_hash with ffff prefix out of range ($port_max)"
+fi
+
+# Consistent with path_hash: same worktree path → same port every time
+hash_for_port=$(path_hash "/test/worktree/path")
+port_from_hash=$(cdp_port_for_hash "$hash_for_port")
+port_from_hash2=$(cdp_port_for_hash "$hash_for_port")
+assert_eq "cdp_port_for_hash stable through path_hash" "$port_from_hash" "$port_from_hash2"
+
+########################################
 # Tests: Output helpers (non-TTY mode)
 ########################################
 
@@ -917,6 +958,22 @@ exec_cmd_no_chrome=$(echo "$output_no_chrome" | grep "EXEC_CMD:" || true)
 assert_not_contains "Without --chrome, no .mcp.json mount" "$exec_cmd_no_chrome" ".mcp.json"
 
 ########################################
+# Tests: --chrome uses computed port
+########################################
+
+section "--chrome uses computed port"
+
+# Compute the expected CDP port for the RAILS_DIR (same path the CLI will use)
+# The CLI calls get_worktree_path → git rev-parse || pwd, and pwd resolves symlinks
+# (e.g. /var → /private/var on macOS), so we must resolve the same way
+_chrome_resolved_path=$(cd "$RAILS_DIR" && pwd)
+_chrome_test_hash=$(path_hash "$_chrome_resolved_path")
+_chrome_expected_port=$(cdp_port_for_hash "$_chrome_test_hash")
+
+assert_contains "Chrome output shows computed port" "$output_chrome" "port ${_chrome_expected_port}"
+assert_contains "CHROME_CDP_URL uses computed port" "$exec_cmd_line" "CHROME_CDP_URL=http://localhost:${_chrome_expected_port}"
+
+########################################
 # Tests: --chrome docker run args structure
 ########################################
 
@@ -934,14 +991,18 @@ assert_contains "Docker run uses rails image" "$exec_cmd_line" "claude-yolo-rail
 
 section "--chrome MCP config content"
 
+# Compute expected port for the rails test dir, same as the CLI would
+_rails_hash=$(path_hash "$RAILS_DIR")
+_expected_port=$(cdp_port_for_hash "$_rails_hash")
+
 # Generate the same MCP config the CLI generates and validate it
 mcp_test_config="$TMPDIR_BASE/mcp-config-test.json"
-cat > "$mcp_test_config" <<'MCPEOF'
+cat > "$mcp_test_config" <<MCPEOF
 {
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:${_expected_port}"]
     }
   }
 }
@@ -968,7 +1029,7 @@ if command -v jq &>/dev/null; then
   assert_contains "MCP server package is chrome-devtools-mcp" "$pkg_arg" "chrome-devtools-mcp"
 
   url_arg=$(jq -r '.mcpServers["chrome-devtools"].args[2]' "$mcp_test_config")
-  assert_eq "MCP server points to localhost:9222" "--browser-url=http://localhost:9222" "$url_arg"
+  assert_eq "MCP server points to computed port" "--browser-url=http://localhost:${_expected_port}" "$url_arg"
 
   num_servers=$(jq '.mcpServers | length' "$mcp_test_config")
   assert_eq "MCP config has exactly one server" "1" "$num_servers"
@@ -981,7 +1042,7 @@ else
   assert_contains "MCP config has mcpServers key" "$content" '"mcpServers"'
   assert_contains "MCP config has chrome-devtools server" "$content" '"chrome-devtools"'
   assert_contains "MCP config uses npx" "$content" '"command": "npx"'
-  assert_contains "MCP config targets localhost:9222" "$content" "localhost:9222"
+  assert_contains "MCP config targets computed port" "$content" "localhost:${_expected_port}"
 fi
 
 rm -f "$mcp_test_config"
