@@ -151,6 +151,14 @@ jobs:
       - name: Verify claude user exists
         run: docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "id claude"
 
+      - name: Verify sudo apt-get works at runtime
+        run: |
+          docker run --rm --entrypoint /bin/bash claude-yolo-rust:test -c "
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq tree &&
+            which tree
+          "
+
       - name: Smoke-test cargo inside container
         run: |
           docker run --rm \
