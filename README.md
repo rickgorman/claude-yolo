@@ -76,6 +76,7 @@ In `--yolo` mode, claude-yolo requires a valid GitHub token so that `gh` works i
 3. `.env` file in the project directory
 4. `~/.env`
 5. `~/.config/gh/hosts.yml` (written by `gh auth login`)
+6. `gh auth token` (macOS Keychain / system keyring)
 
 The token is validated against `api.github.com/user` before launching the container.
 

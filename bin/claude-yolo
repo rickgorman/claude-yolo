@@ -256,6 +256,16 @@ find_github_token() {
     fi
   fi
 
+  # Try gh CLI keyring (macOS Keychain, etc.)
+  if command -v gh &>/dev/null; then
+    token=$(gh auth token 2>/dev/null) || true
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="gh auth token (keyring)"
+      return 0
+    fi
+  fi
+
   return 1
 }
 
@@ -286,6 +296,7 @@ ensure_github_token() {
     dim "  • ${worktree_path}/.env"
     dim "  • ~/.env"
     dim "  • ~/.config/gh/hosts.yml"
+    dim "  • gh auth token (keyring)"
     echo "" >&2
     dim "Set one with:"
     dim "  export GH_TOKEN=ghp_your_token_here"

@@ -1269,14 +1269,27 @@ GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$GH_CONFIG_HOME" find_githu
 assert_eq "find_github_token reads gh CLI config" "gho_from_gh_config" "$_GITHUB_TOKEN"
 assert_contains "find_github_token reports gh config source" "$_GITHUB_TOKEN_SOURCE" "hosts.yml"
 
-section "find_github_token — not found"
+section "find_github_token — gh auth token (keyring)"
 
 EMPTY_HOME="$TMPDIR_BASE/empty-home-for-token"
 mkdir -p "$EMPTY_HOME"
+# Mock gh to simulate keyring-based token retrieval
+gh() { echo "gho_from_keyring"; return 0; }
+_GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
+GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$EMPTY_HOME" find_github_token "$EMPTY_DIR" || true
+assert_eq "find_github_token reads gh auth token" "gho_from_keyring" "$_GITHUB_TOKEN"
+assert_contains "find_github_token reports keyring source" "$_GITHUB_TOKEN_SOURCE" "keyring"
+unset -f gh
+
+section "find_github_token — not found"
+
+# Mock gh to return nothing (simulates no keyring token)
+gh() { return 1; }
 _GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
 GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$EMPTY_HOME" find_github_token "$EMPTY_DIR" && status=0 || status=1
 assert_eq "find_github_token returns failure when nothing found" "1" "$status"
 assert_eq "find_github_token leaves _GITHUB_TOKEN empty" "" "$_GITHUB_TOKEN"
+unset -f gh
 
 ########################################
 # Tests: validate_github_token
