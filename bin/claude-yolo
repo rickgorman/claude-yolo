@@ -189,6 +189,133 @@ ensure_chrome() {
 }
 
 ########################################
+# GitHub token detection & validation
+########################################
+
+_GITHUB_TOKEN=""
+_GITHUB_TOKEN_SOURCE=""
+
+parse_env_file() {
+  local file="$1"
+  local key line token
+  for key in GH_TOKEN GITHUB_TOKEN; do
+    line=$(grep -E "^(export )?${key}=" "$file" 2>/dev/null | head -1 || true)
+    if [[ -n "$line" ]]; then
+      token=$(echo "$line" | sed -E "s/^(export )?${key}=//; s/^['\"]//; s/['\"]$//" | tr -d '[:space:]')
+      if [[ -n "$token" ]]; then
+        echo "$token"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+find_github_token() {
+  local worktree_path="$1"
+
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    _GITHUB_TOKEN="$GH_TOKEN"
+    _GITHUB_TOKEN_SOURCE="GH_TOKEN env var"
+    return 0
+  fi
+
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    _GITHUB_TOKEN="$GITHUB_TOKEN"
+    _GITHUB_TOKEN_SOURCE="GITHUB_TOKEN env var"
+    return 0
+  fi
+
+  local token=""
+
+  if [[ -f "${worktree_path}/.env" ]]; then
+    token=$(parse_env_file "${worktree_path}/.env") || true
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="${worktree_path}/.env"
+      return 0
+    fi
+  fi
+
+  if [[ -f "${HOME}/.env" ]]; then
+    token=$(parse_env_file "${HOME}/.env") || true
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="$HOME/.env"
+      return 0
+    fi
+  fi
+
+  local gh_config="${XDG_CONFIG_HOME:-$HOME/.config}/gh/hosts.yml"
+  if [[ -f "$gh_config" ]]; then
+    token=$(grep 'oauth_token:' "$gh_config" 2>/dev/null | head -1 | sed 's/.*oauth_token:[[:space:]]*//' | tr -d '[:space:]' || true)
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="$gh_config"
+      return 0
+    fi
+  fi
+
+  # Try gh CLI keyring (macOS Keychain, etc.)
+  if command -v gh &>/dev/null; then
+    token=$(gh auth token 2>/dev/null) || true
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="gh auth token (keyring)"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+validate_github_token() {
+  local token="$1"
+  local http_code
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 10 \
+    -H "Authorization: token $token" \
+    https://api.github.com/user 2>/dev/null) || return 1
+  [[ "$http_code" == "200" ]]
+}
+
+ensure_github_token() {
+  local worktree_path="$1"
+
+  if [[ -n "${CLAUDE_YOLO_NO_GITHUB:-}" ]]; then
+    dim "GitHub token check skipped (CLAUDE_YOLO_NO_GITHUB)"
+    return 0
+  fi
+
+  if ! find_github_token "$worktree_path"; then
+    fail "GitHub token not found"
+    echo "" >&2
+    dim "Searched:"
+    dim "  • GH_TOKEN environment variable"
+    dim "  • GITHUB_TOKEN environment variable"
+    dim "  • ${worktree_path}/.env"
+    dim "  • ~/.env"
+    dim "  • ~/.config/gh/hosts.yml"
+    dim "  • gh auth token (keyring)"
+    echo "" >&2
+    dim "Set one with:"
+    dim "  export GH_TOKEN=ghp_your_token_here"
+    echo "" >&2
+    dim "Or skip this check entirely:"
+    dim "  export CLAUDE_YOLO_NO_GITHUB=1"
+    exit 1
+  fi
+
+  if ! validate_github_token "$_GITHUB_TOKEN"; then
+    fail "GitHub token invalid (${_GITHUB_TOKEN_SOURCE})"
+    dim "Verify: GH_TOKEN=\$GH_TOKEN gh auth status"
+    exit 1
+  fi
+
+  success "GitHub token ${DIM}(${_GITHUB_TOKEN_SOURCE})${RESET}"
+}
+
+########################################
 # Ruby version detection (for Rails)
 ########################################
 
@@ -531,6 +658,14 @@ run_with_strategy() {
     -w /workspace
   )
 
+  # GitHub token for gh CLI inside container
+  if [[ -n "$_GITHUB_TOKEN" ]]; then
+    docker_args+=(
+      -e "GH_TOKEN=${_GITHUB_TOKEN}"
+      -e "GITHUB_TOKEN=${_GITHUB_TOKEN}"
+    )
+  fi
+
   if [[ -n "$platform" ]]; then
     docker_args+=(--platform "$platform")
   fi
@@ -759,6 +894,9 @@ main() {
     fi
     [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
   fi
+
+  # Ensure GitHub token for gh CLI inside container
+  ensure_github_token "$worktree_path"
 
   # Force rebuild if requested
   if [[ "$force_build" == true ]]; then
