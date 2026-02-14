@@ -5,7 +5,7 @@
 # Usage:
 #   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
 #              [--env KEY=VALUE]... [--env-file <path>]...
-#              [--trust-github-token]
+#              [--trust-github-token] [--trust-yolo] [--reset]
 #              [-p <prompt>] [claude args...]
 #
 # Flags:
@@ -17,6 +17,8 @@
 #   --env KEY=VALUE     Inject env var into the container (repeatable)
 #   --env-file <path>   Inject env vars from a dotenv-style file (repeatable)
 #   --trust-github-token  Skip broad-scope GitHub token warnings
+#   --trust-yolo        Skip .yolo/ directory trust prompt
+#   --reset             Remove existing container and recreate from image
 #   -p, --print         Run Claude in headless print mode (non-interactive)
 #
 # Without --yolo, passes through to the native claude command.
@@ -29,6 +31,10 @@ STRATEGIES_DIR="$REPO_DIR/strategies"
 
 # Stale image threshold (days)
 STALE_IMAGE_DAYS=14
+
+# .yolo/ config state (set by check_yolo_config)
+YOLO_CONFIG_LOADED=false
+PROJECT_IMAGE_NAME=""
 
 ########################################
 # Color / glyph system
@@ -123,6 +129,12 @@ image_exists() {
 find_running_container() {
   local hash="$1"
   docker ps --format '{{.Names}}' 2>/dev/null | grep "^claude-yolo-${hash}-" | head -1
+}
+
+find_stopped_container() {
+  local hash="$1"
+  docker ps -a --filter "status=exited" --format '{{.Names}}' 2>/dev/null \
+    | grep "^claude-yolo-${hash}-" | head -1
 }
 
 container_uptime() {
@@ -384,6 +396,90 @@ ensure_github_token() {
 }
 
 ########################################
+# .yolo/ project config
+########################################
+
+check_yolo_config() {
+  local worktree_path="$1"
+  local yolo_dir="${worktree_path}/.yolo"
+
+  if [[ ! -d "$yolo_dir" ]]; then
+    return 0
+  fi
+
+  # Compute combined hash of all .yolo/ files
+  local combined=""
+  for f in "$yolo_dir"/*; do
+    [[ -f "$f" ]] || continue
+    combined+="$(cat "$f")"
+  done
+
+  local config_hash
+  if command -v md5 &>/dev/null; then
+    config_hash=$(echo -n "$combined" | md5 | cut -c1-16)
+  elif command -v md5sum &>/dev/null; then
+    config_hash=$(echo -n "$combined" | md5sum | cut -c1-16)
+  else
+    config_hash=$(echo -n "$combined" | shasum | cut -c1-16)
+  fi
+
+  local trust_file="${HOME}/.claude/.yolo-trusted"
+
+  # --trust-yolo bypasses prompt
+  if [[ "$trust_yolo" == true ]]; then
+    mkdir -p "$(dirname "$trust_file")"
+    echo "$config_hash" >> "$trust_file"
+    YOLO_CONFIG_LOADED=true
+    success ".yolo/ config trusted (--trust-yolo)"
+    return 0
+  fi
+
+  # Check if already trusted
+  if [[ -f "$trust_file" ]] && grep -qF "$config_hash" "$trust_file" 2>/dev/null; then
+    YOLO_CONFIG_LOADED=true
+    success ".yolo/ config loaded"
+    return 0
+  fi
+
+  # Prompt user
+  echo "" >&2
+  warn "This project has a ${BOLD}.yolo/${RESET} configuration directory"
+  dim "Files:"
+  for f in "$yolo_dir"/*; do
+    [[ -f "$f" ]] && dim "  $(basename "$f")"
+  done
+  echo "" >&2
+
+  local answer
+  read -p "  Apply .yolo/ config? [Y/n/v(iew)] " answer >&2
+
+  case "$answer" in
+    n|N)
+      return 0
+      ;;
+    v|V)
+      for f in "$yolo_dir"/*; do
+        [[ -f "$f" ]] || continue
+        echo "" >&2
+        echo -e "  ${DIM}── $(basename "$f") ──${RESET}" >&2
+        sed 's/^/    /' "$f" >&2
+      done
+      echo "" >&2
+      read -p "  Apply .yolo/ config? [Y/n] " answer >&2
+      if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+        return 0
+      fi
+      ;;
+  esac
+
+  # Trust it
+  mkdir -p "$(dirname "$trust_file")"
+  echo "$config_hash" >> "$trust_file"
+  YOLO_CONFIG_LOADED=true
+  success ".yolo/ config loaded"
+}
+
+########################################
 # Ruby version detection (for Rails)
 ########################################
 
@@ -414,7 +510,7 @@ detect_ruby_version() {
     fi
   fi
 
-  echo "3.3.0"
+  echo "4.0.1"
 }
 
 detect_python_version() {
@@ -723,6 +819,90 @@ build_strategy_image() {
   fi
 }
 
+build_project_image() {
+  local worktree_path="$1"
+  local hash="$2"
+  local strategy="$3"
+  local verbose="${4:-false}"
+  local yolo_dir="${worktree_path}/.yolo"
+  local image_name="claude-yolo-${hash}"
+
+  # Ensure strategy base image exists
+  if ! image_exists "claude-yolo-${strategy}"; then
+    build_strategy_image "$strategy" "$verbose"
+  fi
+
+  # Compute Dockerfile content hash for change detection
+  local dockerfile_hash
+  if command -v md5 &>/dev/null; then
+    dockerfile_hash=$(md5 -q "$yolo_dir/Dockerfile")
+  elif command -v md5sum &>/dev/null; then
+    dockerfile_hash=$(md5sum "$yolo_dir/Dockerfile" | cut -d' ' -f1)
+  else
+    dockerfile_hash=$(shasum "$yolo_dir/Dockerfile" | cut -d' ' -f1)
+  fi
+
+  # Check if rebuild is needed
+  if image_exists "$image_name" && [[ "$force_build" != true ]]; then
+    local stored_hash
+    stored_hash=$(docker inspect --format '{{index .Config.Labels "yolo.dockerfile.hash"}}' "${image_name}:latest" 2>/dev/null || true)
+    if [[ "$dockerfile_hash" == "$stored_hash" ]]; then
+      return 0
+    fi
+    info "Detected .yolo/Dockerfile change, rebuilding project image"
+  fi
+
+  local -a build_cmd=(docker build)
+  build_cmd+=(
+    --label "yolo.dockerfile.hash=${dockerfile_hash}"
+    -t "${image_name}:latest"
+    -f "$yolo_dir/Dockerfile"
+    "$yolo_dir"
+  )
+
+  info "Building project image ${BOLD}${image_name}${RESET}"
+
+  if [[ "$verbose" == true ]]; then
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" || { fail "Project image build failed"; exit 1; }
+  else
+    local logfile
+    logfile=$(mktemp /tmp/claude-yolo-build-XXXXXX)
+
+    local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local build_start
+    build_start=$(date +%s)
+    local build_pid
+
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" >"$logfile" 2>&1 &
+    build_pid=$!
+
+    while kill -0 "$build_pid" 2>/dev/null; do
+      local elapsed=$(( $(date +%s) - build_start ))
+      local idx=$(( elapsed % ${#spinner_chars} ))
+      local char="${spinner_chars:$idx:1}"
+      printf "\r  ${CYAN}%s${RESET} Building project image... ${DIM}%ds${RESET}  " "$char" "$elapsed" >&2
+      sleep 0.2
+    done
+
+    local exit_code=0
+    wait "$build_pid" || exit_code=$?
+    printf "\r%*s\r" 50 "" >&2
+
+    if [[ $exit_code -ne 0 ]]; then
+      echo "" >&2
+      fail "Project image build failed (see output below)"
+      echo "" >&2
+      cat "$logfile" >&2
+      rm -f "$logfile"
+      exit 1
+    fi
+
+    local total=$(( $(date +%s) - build_start ))
+    rm -f "$logfile"
+    success "Project image ready (${total}s)"
+  fi
+}
+
 ########################################
 # Container execution
 ########################################
@@ -741,10 +921,17 @@ run_with_strategy() {
   local cdp_port
   cdp_port=$(cdp_port_for_hash "$hash")
   local image_name="claude-yolo-${strategy}"
+  if [[ -n "${PROJECT_IMAGE_NAME:-}" ]]; then
+    image_name="$PROJECT_IMAGE_NAME"
+  fi
 
   # Ensure image exists
   if ! image_exists "$image_name"; then
-    build_strategy_image "$strategy" "$verbose"
+    if [[ -n "${PROJECT_IMAGE_NAME:-}" ]]; then
+      build_project_image "$worktree_path" "$hash" "$strategy" "$verbose"
+    else
+      build_strategy_image "$strategy" "$verbose"
+    fi
   fi
 
   # Stale image warning
@@ -766,9 +953,6 @@ run_with_strategy() {
   # Ensure host .claude directory exists for bind mount
   mkdir -p "${HOME}/.claude"
 
-  # Remove stopped container with the same name
-  docker rm "$container_name" 2>/dev/null || true
-
   # Build the docker run command
   # Use -it for interactive, just -i for piped stdin, neither for headless -p mode
   local -a tty_flags=(-it)
@@ -779,7 +963,7 @@ run_with_strategy() {
   fi
 
   local -a docker_args=(
-    docker run ${tty_flags[@]+"${tty_flags[@]}"} --rm
+    docker run ${tty_flags[@]+"${tty_flags[@]}"}
     --name "$container_name"
     --network=host
     -v "${worktree_path}:/workspace"
@@ -825,6 +1009,19 @@ run_with_strategy() {
       docker_args+=(-e "${key}=${val}")
     done < "$env_file"
   done
+
+  # .yolo/env injection
+  if [[ "${YOLO_CONFIG_LOADED}" == true && -f "${worktree_path}/.yolo/env" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      line="${line#export }"
+      local key="${line%%=*}"
+      local val="${line#*=}"
+      val="${val#\"}" && val="${val%\"}"
+      val="${val#\'}" && val="${val%\'}"
+      docker_args+=(-e "${key}=${val}")
+    done < "${worktree_path}/.yolo/env"
+  fi
 
   # Mount git config read-only
   if [[ -f "${HOME}/.gitconfig" ]]; then
@@ -1027,6 +1224,47 @@ attach_to_container() {
     --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
 }
 
+start_stopped_container() {
+  local container_name="$1"
+  shift
+  local claude_args=("$@")
+
+  local strategy="${container_name##*-}"
+
+  info "Resuming stopped container (strategy: ${BOLD}${strategy}${RESET})"
+  docker start "$container_name" >/dev/null 2>&1 || {
+    warn "Failed to restart container, will create a new one"
+    docker rm -f "$container_name" 2>/dev/null || true
+    return 1
+  }
+
+  # Brief pause to let the container stabilize
+  sleep 0.5
+
+  # Verify container is still running
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
+    warn "Container exited after restart, will create a new one"
+    docker rm -f "$container_name" 2>/dev/null || true
+    return 1
+  fi
+
+  dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
+  success "Attaching"
+  footer
+
+  local -a exec_tty_flags=(-it)
+  if [[ "$headless_mode" == true ]]; then
+    exec_tty_flags=()
+  elif ! [[ -t 0 ]]; then
+    exec_tty_flags=(-i)
+  fi
+
+  exec docker exec ${exec_tty_flags[@]+"${exec_tty_flags[@]}"} \
+    -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)" \
+    -e "LINES=$(tput lines 2>/dev/null || echo 40)" \
+    --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
+}
+
 ########################################
 # Main
 ########################################
@@ -1039,6 +1277,8 @@ main() {
   local chrome_mode=false
   local headless_mode=false
   local trust_github_token=false
+  local trust_yolo=false
+  local reset_mode=false
   local -a extra_env=()
   local -a env_files=()
   local claude_args=()
@@ -1081,6 +1321,14 @@ main() {
         trust_github_token=true
         shift
         ;;
+      --trust-yolo)
+        trust_yolo=true
+        shift
+        ;;
+      --reset)
+        reset_mode=true
+        shift
+        ;;
       -p|--print)
         headless_mode=true
         claude_args+=("$1")
@@ -1107,6 +1355,17 @@ main() {
   local hash
   hash=$(path_hash "$worktree_path")
 
+  # --reset: remove existing container(s) and force rebuild
+  if [[ "$reset_mode" == true ]]; then
+    local existing
+    existing=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "^claude-yolo-${hash}-" || true)
+    if [[ -n "$existing" ]]; then
+      echo "$existing" | xargs docker rm -f 2>/dev/null || true
+      info "Removed existing container(s)"
+    fi
+    force_build=true
+  fi
+
   # Check for already-running container before running detection
   local running
   running=$(find_running_container "$hash" || true)
@@ -1115,12 +1374,34 @@ main() {
     return $?
   fi
 
+  # Check for stopped container → restart + attach
+  local stopped
+  stopped=$(find_stopped_container "$hash" || true)
+  if [[ -n "$stopped" ]]; then
+    start_stopped_container "$stopped" ${claude_args[@]+"${claude_args[@]}"} || true
+    # If we reach here, restart failed; fall through to create new container
+  fi
+
+  # .yolo/strategy override (before auto-detection)
+  if [[ -z "$force_strategy" && -f "${worktree_path}/.yolo/strategy" ]]; then
+    local yolo_strategy
+    yolo_strategy=$(cat "${worktree_path}/.yolo/strategy" | tr -d '[:space:]')
+    if [[ -n "$yolo_strategy" && -d "$STRATEGIES_DIR/$yolo_strategy" ]]; then
+      force_strategy="$yolo_strategy"
+      info "Using strategy: ${BOLD}${yolo_strategy}${RESET} (.yolo/strategy)"
+    elif [[ -n "$yolo_strategy" ]]; then
+      warn "Unknown strategy in .yolo/strategy: ${yolo_strategy}, ignoring"
+    fi
+  fi
+
   # Choose strategy
   local strategy
   if [[ -n "$force_strategy" ]]; then
     strategy="$force_strategy"
     [[ -d "$STRATEGIES_DIR/$strategy" ]] || { fail "Unknown strategy: $strategy"; exit 1; }
-    info "Using strategy: ${BOLD}${strategy}${RESET} (--strategy flag)"
+    if [[ -z "${yolo_strategy:-}" ]]; then
+      info "Using strategy: ${BOLD}${strategy}${RESET} (--strategy flag)"
+    fi
   else
     strategy=$(choose_strategy "$worktree_path")
     if [[ "$strategy" == "__unknown__" ]]; then
@@ -1132,9 +1413,18 @@ main() {
   # Ensure GitHub token for gh CLI inside container
   ensure_github_token "$worktree_path"
 
+  # Check .yolo/ trust + load config
+  check_yolo_config "$worktree_path"
+
   # Force rebuild if requested
   if [[ "$force_build" == true ]]; then
     build_strategy_image "$strategy" "$verbose"
+  fi
+
+  # Build project image if .yolo/Dockerfile exists and config loaded
+  if [[ "${YOLO_CONFIG_LOADED}" == true && -f "${worktree_path}/.yolo/Dockerfile" ]]; then
+    PROJECT_IMAGE_NAME="claude-yolo-${hash}"
+    build_project_image "$worktree_path" "$hash" "$strategy" "$verbose"
   fi
 
   local container_name="claude-yolo-${hash}-${strategy}"

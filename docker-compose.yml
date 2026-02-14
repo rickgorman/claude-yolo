@@ -20,7 +20,7 @@ services:
     working_dir: /workspace
     environment:
       - CHROME_CDP_URL=http://localhost:9222
-      - RUBY_VERSION=${RUBY_VERSION:-3.3.0}
+      - RUBY_VERSION=${RUBY_VERSION:-4.0.1}
       - DB_HOST=localhost
       - DB_USERNAME=postgres
       - DB_PASSWORD=postgres
