@@ -2400,6 +2400,7 @@ section "check_yolo_config — no .yolo/ directory"
 
 # check_yolo_config should be a no-op when .yolo/ doesn't exist
 YOLO_CONFIG_LOADED=false
+# shellcheck disable=SC2034
 trust_yolo=false
 check_yolo_config "$EMPTY_DIR" 2>/dev/null
 assert_eq "check_yolo_config returns 0 without .yolo/" "false" "$YOLO_CONFIG_LOADED"
@@ -2428,6 +2429,7 @@ section "check_yolo_config — already trusted"
 
 # Run again with the same config; should auto-trust
 YOLO_CONFIG_LOADED=false
+# shellcheck disable=SC2034
 trust_yolo=false
 HOME="$YOLO_TRUST_HOME" check_yolo_config "$YOLO_TRUST_FLAG_DIR" 2>/dev/null
 assert_eq "check_yolo_config auto-trusts known config" "true" "$YOLO_CONFIG_LOADED"
