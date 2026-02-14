@@ -32,4 +32,9 @@ if [[ -f /workspace/gradlew ]]; then
   chmod +x /workspace/gradlew
 fi
 
+# Propagate host terminal dimensions to the container PTY
+if [[ -t 0 ]] && [[ -n "${COLUMNS:-}" ]] && [[ -n "${LINES:-}" ]]; then
+  stty columns "$COLUMNS" rows "$LINES" 2>/dev/null || true
+fi
+
 exec "$@"
