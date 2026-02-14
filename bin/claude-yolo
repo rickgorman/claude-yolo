@@ -1028,6 +1028,48 @@ attach_to_container() {
 }
 
 ########################################
+# Help
+########################################
+
+show_help() {
+  cat <<EOF >&2
+
+  ${BOLD}claude·yolo${RESET} — Run Claude Code in an isolated Docker container
+
+  ${BOLD}Usage:${RESET}
+    claude-yolo --yolo [options] [claude args...]
+    claude-yolo [claude args...]            ${DIM}(pass-through to native claude)${RESET}
+
+  ${BOLD}Container:${RESET}
+    --yolo                   Run in a Docker container with --dangerously-skip-permissions
+    --strategy <name>        Skip auto-detection, use a specific strategy
+                             ${DIM}(rails, python, node, go, android, rust, generic)${RESET}
+    --build                  Force rebuild the Docker image before running
+    --verbose                Show Docker build output instead of a spinner
+
+  ${BOLD}Environment:${RESET}
+    --env KEY=VALUE          Inject an env var into the container ${DIM}(repeatable)${RESET}
+    --env-file <path>        Inject env vars from a dotenv-style file ${DIM}(repeatable)${RESET}
+
+  ${BOLD}Security:${RESET}
+    --trust-github-token     Proceed even if the GitHub token has broad scopes
+                             ${DIM}(delete_repo, admin:org, etc.)${RESET}
+
+  ${BOLD}Modes:${RESET}
+    -p, --print              Headless mode — drop TTY, pass -p to Claude
+    --chrome                 Enable Chrome DevTools MCP server for browser control
+
+  ${BOLD}Info:${RESET}
+    -h, --help               Show this help and exit
+    CLAUDE_YOLO_NO_GITHUB=1  Skip GitHub token detection entirely
+
+  ${DIM}Without --yolo, all arguments are forwarded to the native claude command.${RESET}
+
+EOF
+  exit 0
+}
+
+########################################
 # Main
 ########################################
 
@@ -1045,6 +1087,9 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      -h|--help)
+        show_help
+        ;;
       --yolo)
         yolo_mode=true
         shift
