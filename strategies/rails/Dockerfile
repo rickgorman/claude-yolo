@@ -41,10 +41,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     unzip \
     socat
 
-# Node.js 20 LTS
+# Node.js 22 LTS
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
 # GitHub CLI
