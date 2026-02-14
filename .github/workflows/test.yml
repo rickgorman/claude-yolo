@@ -234,7 +234,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=python
 
       - name: Verify pyenv is installed
-        run: docker run --rm --entrypoint /bin/bash claude-yolo-python:test -c "pyenv --version"
+        run: docker run --rm --user claude --entrypoint /bin/bash claude-yolo-python:test -c "pyenv --version"
 
       - name: Verify claude-code is installed
         run: docker run --rm --entrypoint /bin/bash claude-yolo-python:test -c "which claude"
@@ -256,6 +256,7 @@ jobs:
       - name: Smoke-test pyenv install and pip inside container
         run: |
           docker run --rm \
+            --user claude \
             --entrypoint /bin/bash \
             claude-yolo-python:test \
             -c '
@@ -305,7 +306,7 @@ jobs:
 
       - name: Verify nvm is installed
         run: |
-          docker run --rm --entrypoint /bin/bash claude-yolo-node:test -c '
+          docker run --rm --user claude --entrypoint /bin/bash claude-yolo-node:test -c '
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
             nvm --version
@@ -331,6 +332,7 @@ jobs:
       - name: Smoke-test nvm install and npm inside container
         run: |
           docker run --rm \
+            --user claude \
             --entrypoint /bin/bash \
             claude-yolo-node:test \
             -c '
@@ -339,7 +341,7 @@ jobs:
               nvm install 20 &&
               node --version &&
               npm --version &&
-              npm init -y &&
+              cd /tmp && npm init -y &&
               npm install lodash &&
               node -e "console.log(require(\"lodash\").VERSION)"
             '
@@ -402,9 +404,12 @@ jobs:
       - name: Smoke-test go build inside container
         run: |
           docker run --rm \
+            --user claude \
             --entrypoint /bin/bash \
             claude-yolo-go:test \
             -c '
+              export GOPATH="$HOME/go"
+              export PATH="$GOPATH/bin:/usr/local/go/bin:$PATH"
               mkdir -p /tmp/smoke && cd /tmp/smoke &&
               go mod init smoke-test &&
               cat > main.go <<GOEOF
