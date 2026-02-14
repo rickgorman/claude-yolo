@@ -5,6 +5,7 @@
 set -euo pipefail
 
 CDP_PORT="${CDP_PORT:-9222}"
+PID_FILE="${TMPDIR:-/tmp}/claude-yolo-chrome-${CDP_PORT}.pid"
 
 # Detect Chrome path based on OS
 detect_chrome() {
@@ -34,7 +35,24 @@ cdp_running() {
   curl -s --connect-timeout 1 "http://localhost:${CDP_PORT}/json/version" &>/dev/null
 }
 
+stop_chrome() {
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid=$(cat "$PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      echo "[start-chrome] Stopped Chrome (PID $pid, port ${CDP_PORT})" >&2
+    fi
+    rm -f "$PID_FILE"
+  fi
+}
+
 main() {
+  if [[ "${1:-}" == "--stop" ]]; then
+    stop_chrome
+    exit 0
+  fi
+
   if cdp_running; then
     echo "[start-chrome] Chrome CDP already running on port ${CDP_PORT}" >&2
     exit 0
@@ -54,6 +72,7 @@ main() {
   mkdir -p "$user_data_dir"
 
   "$chrome_path" \
+    --headless=new \
     --remote-debugging-port="${CDP_PORT}" \
     --user-data-dir="$user_data_dir" \
     --no-first-run \
@@ -70,6 +89,9 @@ main() {
     --metrics-recording-only \
     --safebrowsing-disable-auto-update \
     &>/dev/null &
+
+  CHROME_PID=$!
+  echo "$CHROME_PID" > "$PID_FILE"
 
   # Wait for CDP to become available
   local attempts=0

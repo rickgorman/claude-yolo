@@ -1278,6 +1278,18 @@ MCPEOF
   info "Starting container ${DIM}${container_name}${RESET}"
   success "Launching Claude Code"
   footer
+
+  # When Chrome was started, spawn a background cleanup watcher.
+  # It waits for this process to exit, then stops the Chrome instance.
+  if [[ "$chrome_mode" == true ]]; then
+    (
+      # Wait for parent process (which will be replaced by exec) to exit
+      while kill -0 $$ 2>/dev/null; do sleep 1; done
+      CDP_PORT="$cdp_port" "$REPO_DIR/scripts/start-chrome.sh" --stop 2>/dev/null
+    ) &
+    disown
+  fi
+
   exec "${docker_args[@]}"
 }
 
