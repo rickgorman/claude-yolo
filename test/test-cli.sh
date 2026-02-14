@@ -127,6 +127,63 @@ echo "plugins { id 'com.android.application' }" > "$RN_DIR/android/build.gradle"
 echo "android {}" > "$RN_DIR/android/app/build.gradle"
 echo "<manifest />" > "$RN_DIR/android/app/src/main/AndroidManifest.xml"
 
+# Full Python project
+PYTHON_DIR="$TMPDIR_BASE/python-project"
+mkdir -p "$PYTHON_DIR"
+cat > "$PYTHON_DIR/pyproject.toml" << 'EOF'
+[project]
+name = "myproject"
+requires-python = ">=3.11"
+EOF
+echo "requests>=2.28" > "$PYTHON_DIR/requirements.txt"
+echo "3.12.0" > "$PYTHON_DIR/.python-version"
+
+# Weak Python signal (just requirements.txt)
+WEAK_PYTHON="$TMPDIR_BASE/weak-python"
+mkdir -p "$WEAK_PYTHON"
+echo "requests>=2.28" > "$WEAK_PYTHON/requirements.txt"
+
+# Full Node.js project
+NODE_DIR="$TMPDIR_BASE/node-project"
+mkdir -p "$NODE_DIR"
+echo '{"name": "myapp", "version": "1.0.0"}' > "$NODE_DIR/package.json"
+echo '{}' > "$NODE_DIR/package-lock.json"
+echo '{"compilerOptions": {"target": "es2020"}}' > "$NODE_DIR/tsconfig.json"
+echo "20" > "$NODE_DIR/.nvmrc"
+
+# Weak Node.js signal (just package.json, no lockfile or TS)
+WEAK_NODE="$TMPDIR_BASE/weak-node"
+mkdir -p "$WEAK_NODE"
+echo '{"name": "myapp"}' > "$WEAK_NODE/package.json"
+
+# Rails project with package.json (should prefer rails, not node)
+RAILS_WITH_NODE="$TMPDIR_BASE/rails-with-node"
+mkdir -p "$RAILS_WITH_NODE/config"
+echo "gem 'rails'" > "$RAILS_WITH_NODE/Gemfile"
+echo "# app" > "$RAILS_WITH_NODE/config/application.rb"
+echo '{"name": "rails-frontend"}' > "$RAILS_WITH_NODE/package.json"
+
+# Full Go project
+GO_DIR="$TMPDIR_BASE/go-project"
+mkdir -p "$GO_DIR/cmd/server"
+cat > "$GO_DIR/go.mod" << 'EOF'
+module github.com/example/myproject
+
+go 1.23
+EOF
+echo "package main" > "$GO_DIR/go.sum"
+echo 'package main; func main() {}' > "$GO_DIR/main.go"
+echo 'package main; func main() {}' > "$GO_DIR/cmd/server/main.go"
+
+# Weak Go signal (just go.mod)
+WEAK_GO="$TMPDIR_BASE/weak-go"
+mkdir -p "$WEAK_GO"
+cat > "$WEAK_GO/go.mod" << 'EOF'
+module github.com/example/small
+
+go 1.23
+EOF
+
 # Empty project
 EMPTY_DIR="$TMPDIR_BASE/empty-project"
 mkdir -p "$EMPTY_DIR"
@@ -315,6 +372,113 @@ generic_empty=$("$STRATEGIES_DIR/generic/detect.sh" "$EMPTY_DIR" 2>/dev/null)
 generic_empty_conf=$(echo "$generic_empty" | grep '^CONFIDENCE:' | cut -d: -f2)
 assert_eq "Generic detection 0% for empty dir" "0" "$generic_empty_conf"
 
+section "Strategy detection — Python"
+
+python_output=$("$STRATEGIES_DIR/python/detect.sh" "$PYTHON_DIR" 2>/dev/null)
+python_confidence=$(echo "$python_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+python_evidence=$(echo "$python_output" | grep '^EVIDENCE:' | cut -d: -f2-)
+
+if [[ "$python_confidence" -ge 80 ]]; then
+  pass "Python confidence ≥80% for full Python project ($python_confidence%)"
+else
+  fail "Python confidence ≥80% for full Python project (got $python_confidence%)"
+fi
+assert_contains "Python evidence includes pyproject.toml" "$python_evidence" "pyproject.toml"
+assert_contains "Python evidence includes requirements.txt" "$python_evidence" "requirements.txt"
+assert_contains "Python evidence includes .python-version" "$python_evidence" ".python-version"
+
+section "Strategy detection — Python (weak signal)"
+
+weak_python_output=$("$STRATEGIES_DIR/python/detect.sh" "$WEAK_PYTHON" 2>/dev/null)
+weak_python_conf=$(echo "$weak_python_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+
+if [[ "$weak_python_conf" -lt 80 ]]; then
+  pass "Python detection <80% for just requirements.txt ($weak_python_conf%)"
+else
+  fail "Python detection <80% for just requirements.txt (got $weak_python_conf%)"
+fi
+
+python_empty=$("$STRATEGIES_DIR/python/detect.sh" "$EMPTY_DIR" 2>/dev/null)
+python_empty_conf=$(echo "$python_empty" | grep '^CONFIDENCE:' | cut -d: -f2)
+assert_eq "Python detection 0% for empty dir" "0" "$python_empty_conf"
+
+section "Strategy detection — Node.js"
+
+node_output=$("$STRATEGIES_DIR/node/detect.sh" "$NODE_DIR" 2>/dev/null)
+node_confidence=$(echo "$node_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+node_evidence=$(echo "$node_output" | grep '^EVIDENCE:' | cut -d: -f2-)
+
+if [[ "$node_confidence" -ge 80 ]]; then
+  pass "Node.js confidence ≥80% for full Node project ($node_confidence%)"
+else
+  fail "Node.js confidence ≥80% for full Node project (got $node_confidence%)"
+fi
+assert_contains "Node.js evidence includes package.json" "$node_evidence" "package.json"
+assert_contains "Node.js evidence includes tsconfig.json" "$node_evidence" "tsconfig.json"
+assert_contains "Node.js evidence includes .nvmrc" "$node_evidence" ".nvmrc"
+
+section "Strategy detection — Node.js (weak signal)"
+
+weak_node_output=$("$STRATEGIES_DIR/node/detect.sh" "$WEAK_NODE" 2>/dev/null)
+weak_node_conf=$(echo "$weak_node_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+
+if [[ "$weak_node_conf" -lt 80 ]]; then
+  pass "Node.js detection <80% for just package.json ($weak_node_conf%)"
+else
+  fail "Node.js detection <80% for just package.json (got $weak_node_conf%)"
+fi
+
+section "Strategy detection — Node.js (Rails project with package.json)"
+
+rails_node_output=$("$STRATEGIES_DIR/node/detect.sh" "$RAILS_WITH_NODE" 2>/dev/null)
+rails_node_conf=$(echo "$rails_node_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+
+if [[ "$rails_node_conf" -lt 80 ]]; then
+  pass "Node.js detection <80% for Rails project with package.json ($rails_node_conf%)"
+else
+  fail "Node.js detection <80% for Rails project with package.json (got $rails_node_conf%)"
+fi
+
+node_empty=$("$STRATEGIES_DIR/node/detect.sh" "$EMPTY_DIR" 2>/dev/null)
+node_empty_conf=$(echo "$node_empty" | grep '^CONFIDENCE:' | cut -d: -f2)
+assert_eq "Node.js detection 0% for empty dir" "0" "$node_empty_conf"
+
+section "Strategy detection — Go"
+
+go_output=$("$STRATEGIES_DIR/go/detect.sh" "$GO_DIR" 2>/dev/null)
+go_confidence=$(echo "$go_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+go_evidence=$(echo "$go_output" | grep '^EVIDENCE:' | cut -d: -f2-)
+
+if [[ "$go_confidence" -ge 80 ]]; then
+  pass "Go confidence ≥80% for full Go project ($go_confidence%)"
+else
+  fail "Go confidence ≥80% for full Go project (got $go_confidence%)"
+fi
+assert_contains "Go evidence includes go.mod" "$go_evidence" "go.mod"
+assert_contains "Go evidence includes main.go" "$go_evidence" "main.go"
+assert_contains "Go evidence includes cmd/" "$go_evidence" "cmd/"
+
+section "Strategy detection — Go (weak signal)"
+
+weak_go_output=$("$STRATEGIES_DIR/go/detect.sh" "$WEAK_GO" 2>/dev/null)
+weak_go_conf=$(echo "$weak_go_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+
+if [[ "$weak_go_conf" -lt 80 ]]; then
+  pass "Go detection <80% for just go.mod ($weak_go_conf%)"
+else
+  fail "Go detection <80% for just go.mod (got $weak_go_conf%)"
+fi
+
+go_empty=$("$STRATEGIES_DIR/go/detect.sh" "$EMPTY_DIR" 2>/dev/null)
+go_empty_conf=$(echo "$go_empty" | grep '^CONFIDENCE:' | cut -d: -f2)
+assert_eq "Go detection 0% for empty dir" "0" "$go_empty_conf"
+
+section "Strategy detection — No match (new strategies)"
+
+assert_eq "Python detection 0% for empty dir" "0" "$python_empty_conf"
+assert_eq "Node.js detection 0% for empty dir" "0" "$node_empty_conf"
+assert_eq "Go detection 0% for empty dir" "0" "$go_empty_conf"
+
 ########################################
 # Tests: run_detection integration
 ########################################
@@ -330,6 +494,15 @@ assert_eq "run_detection returns empty for empty dir" "" "$detections"
 # Both rails and android should detect the RN project
 detections=$(run_detection "$RN_DIR")
 assert_contains "run_detection finds android for RN project" "$detections" "android"
+
+detections=$(run_detection "$PYTHON_DIR")
+assert_contains "run_detection finds python for Python project" "$detections" "python"
+
+detections=$(run_detection "$NODE_DIR")
+assert_contains "run_detection finds node for Node.js project" "$detections" "node"
+
+detections=$(run_detection "$GO_DIR")
+assert_contains "run_detection finds go for Go project" "$detections" "go"
 
 ########################################
 # Tests: Ruby version detection
@@ -373,6 +546,69 @@ ver=$(detect_ruby_version "$MULTI_DIR")
 assert_eq ".ruby-version takes priority over others" "3.3.0" "$ver"
 
 ########################################
+# Tests: Python version detection
+########################################
+
+section "Python version detection"
+
+ver=$(detect_python_version "$PYTHON_DIR")
+assert_eq "Detects Python from .python-version" "3.12.0" "$ver"
+
+PYTHON_TOOL_VER_DIR="$TMPDIR_BASE/python-tool-versions"
+mkdir -p "$PYTHON_TOOL_VER_DIR"
+echo "python 3.11.5" > "$PYTHON_TOOL_VER_DIR/.tool-versions"
+ver=$(detect_python_version "$PYTHON_TOOL_VER_DIR")
+assert_eq "Detects Python from .tool-versions" "3.11.5" "$ver"
+
+PYTHON_NOVER_DIR="$TMPDIR_BASE/no-python-version"
+mkdir -p "$PYTHON_NOVER_DIR"
+ver=$(detect_python_version "$PYTHON_NOVER_DIR")
+assert_eq "Falls back to 3.12 when no Python version found" "3.12" "$ver"
+
+# Priority: .python-version > .tool-versions
+PYTHON_MULTI_DIR="$TMPDIR_BASE/python-multi-version"
+mkdir -p "$PYTHON_MULTI_DIR"
+echo "3.12.0" > "$PYTHON_MULTI_DIR/.python-version"
+echo "python 3.11.0" > "$PYTHON_MULTI_DIR/.tool-versions"
+ver=$(detect_python_version "$PYTHON_MULTI_DIR")
+assert_eq ".python-version takes priority for Python" "3.12.0" "$ver"
+
+########################################
+# Tests: Node.js version detection
+########################################
+
+section "Node.js version detection"
+
+ver=$(detect_node_version "$NODE_DIR")
+assert_eq "Detects Node from .nvmrc" "20" "$ver"
+
+NODE_VER_DIR="$TMPDIR_BASE/node-version-file"
+mkdir -p "$NODE_VER_DIR"
+echo "18.19.0" > "$NODE_VER_DIR/.node-version"
+ver=$(detect_node_version "$NODE_VER_DIR")
+assert_eq "Detects Node from .node-version" "18.19.0" "$ver"
+
+NODE_TOOL_VER_DIR="$TMPDIR_BASE/node-tool-versions"
+mkdir -p "$NODE_TOOL_VER_DIR"
+echo "nodejs 20.11.0" > "$NODE_TOOL_VER_DIR/.tool-versions"
+ver=$(detect_node_version "$NODE_TOOL_VER_DIR")
+assert_eq "Detects Node from .tool-versions" "20.11.0" "$ver"
+
+NODE_NOVER_DIR="$TMPDIR_BASE/no-node-version"
+mkdir -p "$NODE_NOVER_DIR"
+ver=$(detect_node_version "$NODE_NOVER_DIR")
+assert_eq "Falls back to 20 when no Node version found" "20" "$ver"
+
+# Priority: .nvmrc > .node-version > .tool-versions
+NODE_MULTI_DIR="$TMPDIR_BASE/node-multi-version"
+mkdir -p "$NODE_MULTI_DIR"
+echo "20" > "$NODE_MULTI_DIR/.nvmrc"
+echo "18.0.0" > "$NODE_MULTI_DIR/.node-version"
+echo "nodejs 16.0.0" > "$NODE_MULTI_DIR/.tool-versions"
+ver=$(detect_node_version "$NODE_MULTI_DIR")
+assert_eq ".nvmrc takes priority for Node" "20" "$ver"
+
+########################################
 # Tests: list_strategies
 ########################################
 
@@ -382,6 +618,9 @@ strategies=$(list_strategies)
 assert_contains "list_strategies includes rails" "$strategies" "rails"
 assert_contains "list_strategies includes android" "$strategies" "android"
 assert_contains "list_strategies includes generic" "$strategies" "generic"
+assert_contains "list_strategies includes python" "$strategies" "python"
+assert_contains "list_strategies includes node" "$strategies" "node"
+assert_contains "list_strategies includes go" "$strategies" "go"
 
 ########################################
 # Tests: Strategy description files
@@ -634,6 +873,9 @@ assert_contains "Output includes no-detect warning" "$output" "No environment au
 assert_contains "Output includes strategy list" "$output" "Select an environment"
 assert_contains "Output shows strategy descriptions" "$output" "Ruby (rbenv)"
 assert_contains "Output shows android description" "$output" "JDK 17"
+assert_contains "Output shows python description" "$output" "Python (pyenv)"
+assert_contains "Output shows node description" "$output" "Node.js (nvm)"
+assert_contains "Output shows go description" "$output" "Go"
 
 section "CLI integration — invalid menu selection"
 

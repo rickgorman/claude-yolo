@@ -355,6 +355,61 @@ detect_ruby_version() {
   echo "3.3.0"
 }
 
+detect_python_version() {
+  local worktree_path="$1"
+
+  if [[ -f "${worktree_path}/.python-version" ]]; then
+    cat "${worktree_path}/.python-version" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.tool-versions" ]]; then
+    local ver
+    ver=$(grep "^python " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $2}' | head -1)
+    if [[ -n "$ver" ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  if [[ -f "${worktree_path}/pyproject.toml" ]]; then
+    local ver
+    ver=$(grep -E '^requires-python' "${worktree_path}/pyproject.toml" 2>/dev/null | \
+      sed -E 's/.*>=[[:space:]]*"?([0-9]+\.[0-9]+).*/\1/' | head -1)
+    if [[ -n "$ver" && "$ver" != *"requires"* ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  echo "3.12"
+}
+
+detect_node_version() {
+  local worktree_path="$1"
+
+  if [[ -f "${worktree_path}/.nvmrc" ]]; then
+    cat "${worktree_path}/.nvmrc" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.node-version" ]]; then
+    cat "${worktree_path}/.node-version" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.tool-versions" ]]; then
+    local ver
+    ver=$(grep "^nodejs " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $2}' | head -1)
+    if [[ -n "$ver" ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  echo "20"
+}
+
 ########################################
 # Environment detection
 ########################################
@@ -766,6 +821,45 @@ run_with_strategy() {
 
       info "Worktree  ${display_worktree}"
       info "Rust · Cargo"
+      ;;
+
+    python)
+      local python_version
+      python_version=$(detect_python_version "$worktree_path")
+      local pyenv_volume="claude-yolo-${hash}-pyenv"
+
+      docker_args+=(
+        -v "${pyenv_volume}:/home/claude/.pyenv/versions"
+        -e "PYTHON_VERSION=${python_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Python ${python_version} · pip"
+      ;;
+
+    node)
+      local node_version
+      node_version=$(detect_node_version "$worktree_path")
+      local nvm_volume="claude-yolo-${hash}-nvm"
+
+      docker_args+=(
+        -v "${nvm_volume}:/home/claude/.nvm"
+        -e "NODE_VERSION=${node_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Node.js ${node_version} · npm"
+      ;;
+
+    go)
+      local gopath_volume="claude-yolo-${hash}-gopath"
+
+      docker_args+=(
+        -v "${gopath_volume}:/home/claude/go"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Go · modules"
       ;;
 
     generic)
