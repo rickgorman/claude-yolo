@@ -1805,6 +1805,362 @@ assert_contains "ensure_github_token prints skip message" "$skip_output" "skippe
 assert_eq "_GITHUB_TOKEN stays empty when skipped" "" "$_GITHUB_TOKEN"
 
 ########################################
+# Tests: --env flag
+########################################
+
+section "--env flag injects env vars into docker run"
+
+ENV_DOCKER_LOG="$TMPDIR_BASE/docker-env-args.log"
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$ENV_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output=$(cd "$RAILS_DIR" && \
+  HOME="$FAKE_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy rails --env MY_VAR=hello --env OTHER_VAR=world 2>&1 || true)
+
+env_docker_args=$(cat "$ENV_DOCKER_LOG" 2>/dev/null || echo "")
+assert_contains "--env injects MY_VAR" "$env_docker_args" "MY_VAR=hello"
+assert_contains "--env injects OTHER_VAR" "$env_docker_args" "OTHER_VAR=world"
+
+section "--env without value shows error"
+
+output=$(bash "$CLI" --yolo --env 2>&1 || true)
+assert_contains "--env without arg shows error" "$output" "--env requires a KEY=VALUE argument"
+
+########################################
+# Tests: --env-file flag
+########################################
+
+section "--env-file injects env vars from file"
+
+ENV_FILE_TEST="$TMPDIR_BASE/test-env-file"
+cat > "$ENV_FILE_TEST" << 'EOF'
+# This is a comment
+API_KEY=secret123
+export DATABASE_URL=postgres://localhost/mydb
+
+EMPTY_LINE_ABOVE=yes
+QUOTED_VAR="quoted_value"
+SINGLE_QUOTED='single_value'
+EOF
+
+ENV_FILE_DOCKER_LOG="$TMPDIR_BASE/docker-envfile-args.log"
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$ENV_FILE_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output=$(cd "$RAILS_DIR" && \
+  HOME="$FAKE_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy rails --env-file "$ENV_FILE_TEST" 2>&1 || true)
+
+envfile_docker_args=$(cat "$ENV_FILE_DOCKER_LOG" 2>/dev/null || echo "")
+assert_contains "--env-file injects API_KEY" "$envfile_docker_args" "API_KEY=secret123"
+assert_contains "--env-file injects DATABASE_URL" "$envfile_docker_args" "DATABASE_URL=postgres://localhost/mydb"
+assert_contains "--env-file injects EMPTY_LINE_ABOVE" "$envfile_docker_args" "EMPTY_LINE_ABOVE=yes"
+assert_contains "--env-file strips double quotes" "$envfile_docker_args" "QUOTED_VAR=quoted_value"
+assert_contains "--env-file strips single quotes" "$envfile_docker_args" "SINGLE_QUOTED=single_value"
+assert_not_contains "--env-file skips comments" "$envfile_docker_args" "This is a comment"
+
+section "--env-file with missing file shows error"
+
+output=$(bash "$CLI" --yolo --env-file /nonexistent/path 2>&1 || true)
+assert_contains "--env-file missing file shows error" "$output" "file not found"
+
+section "--env-file without path shows error"
+
+output=$(bash "$CLI" --yolo --env-file 2>&1 || true)
+assert_contains "--env-file without arg shows error" "$output" "--env-file requires a path argument"
+
+section "--env and --env-file combined"
+
+ENV_COMBINED_LOG="$TMPDIR_BASE/docker-env-combined.log"
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$ENV_COMBINED_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output=$(cd "$RAILS_DIR" && \
+  HOME="$FAKE_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy rails --env INLINE_VAR=inline --env-file "$ENV_FILE_TEST" 2>&1 || true)
+
+combined_docker_args=$(cat "$ENV_COMBINED_LOG" 2>/dev/null || echo "")
+assert_contains "Combined: --env var present" "$combined_docker_args" "INLINE_VAR=inline"
+assert_contains "Combined: --env-file var present" "$combined_docker_args" "API_KEY=secret123"
+
+########################################
+# Tests: -p / --print headless mode
+########################################
+
+section "-p / --print headless mode"
+
+# Use the exec-capturing mock from chrome tests
+PRINT_OUTPUT=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image) shift; case "$1" in inspect) return 0 ;; *) return 1 ;; esac ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails -p "run tests" 2>&1
+' 2>&1 || true)
+
+print_exec_cmd=$(echo "$PRINT_OUTPUT" | grep "EXEC_CMD:" || true)
+
+assert_contains "-p passes through to claude args" "$print_exec_cmd" -- "-p"
+assert_contains "-p passes the prompt" "$print_exec_cmd" "run tests"
+assert_not_contains "-p mode drops -it flag" "$print_exec_cmd" " -it "
+assert_contains "-p mode still runs docker" "$print_exec_cmd" "docker run"
+
+section "--print flag works same as -p"
+
+PRINT_LONG_OUTPUT=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image) shift; case "$1" in inspect) return 0 ;; *) return 1 ;; esac ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails --print "run tests" 2>&1
+' 2>&1 || true)
+
+print_long_exec_cmd=$(echo "$PRINT_LONG_OUTPUT" | grep "EXEC_CMD:" || true)
+assert_contains "--print passes through to claude args" "$print_long_exec_cmd" -- "--print"
+assert_not_contains "--print mode drops -it flag" "$print_long_exec_cmd" " -it "
+
+section "-p without --yolo passes through to native claude"
+
+PRINT_NO_YOLO=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() { return 1; }
+  export -f docker
+  bash "'"$CLI"'" -p "just a prompt" 2>&1
+' 2>&1 || true)
+
+assert_contains "-p without --yolo passes to native claude" "$PRINT_NO_YOLO" "EXEC_CMD:"
+assert_contains "-p without --yolo includes -p flag" "$PRINT_NO_YOLO" "-p"
+assert_not_contains "-p without --yolo has no docker" "$PRINT_NO_YOLO" "docker run"
+
+########################################
+# Tests: GitHub token scope validation
+########################################
+
+section "check_github_token_scopes — safe token"
+
+_GITHUB_TOKEN_SCOPES="" _BROAD_SCOPES=""
+# Mock curl to return safe scopes
+curl() {
+  echo "HTTP/2 200"
+  echo "x-oauth-scopes: repo, read:org"
+  echo ""
+  return 0
+}
+check_github_token_scopes "ghp_safe_token" && scope_status=0 || scope_status=1
+assert_eq "Safe scopes return success" "0" "$scope_status"
+assert_eq "No broad scopes detected" "" "$_BROAD_SCOPES"
+unset -f curl
+
+section "check_github_token_scopes — broad token"
+
+_GITHUB_TOKEN_SCOPES="" _BROAD_SCOPES=""
+curl() {
+  echo "HTTP/2 200"
+  echo "x-oauth-scopes: repo, delete_repo, admin:org"
+  echo ""
+  return 0
+}
+check_github_token_scopes "ghp_broad_token" && scope_status=0 || scope_status=1
+assert_eq "Broad scopes return failure" "1" "$scope_status"
+assert_contains "Detects delete_repo" "$_BROAD_SCOPES" "delete_repo"
+assert_contains "Detects admin:org" "$_BROAD_SCOPES" "admin:org"
+unset -f curl
+
+section "check_github_token_scopes — fine-grained token (no header)"
+
+_GITHUB_TOKEN_SCOPES="" _BROAD_SCOPES=""
+curl() {
+  echo "HTTP/2 200"
+  echo ""
+  return 0
+}
+check_github_token_scopes "github_pat_fine_grained" && scope_status=0 || scope_status=1
+assert_eq "Fine-grained token (no X-OAuth-Scopes) returns success" "0" "$scope_status"
+unset -f curl
+
+section "check_github_token_scopes — curl failure"
+
+_GITHUB_TOKEN_SCOPES="" _BROAD_SCOPES=""
+curl() { return 1; }
+check_github_token_scopes "ghp_network_error" && scope_status=0 || scope_status=1
+assert_eq "Curl failure returns success (fail-open)" "0" "$scope_status"
+unset -f curl
+
+section "GitHub token scope — broad token blocks execution"
+
+output_broad=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *-o\ /dev/null*) echo "200"; return 0 ;;
+      *-I*|*-sI*) echo "HTTP/2 200"; echo "x-oauth-scopes: repo, delete_repo, admin:org"; echo ""; return 0 ;;
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "Broad scope shows warning" "$output_broad" "broad scopes"
+assert_contains "Broad scope shows delete_repo" "$output_broad" "delete_repo"
+assert_contains "Broad scope blocks execution" "$output_broad" "Refusing to proceed"
+assert_contains "Broad scope suggests --trust-github-token" "$output_broad" "--trust-github-token"
+assert_not_contains "Broad scope does not reach docker run" "$output_broad" "Launching Claude Code"
+
+section "GitHub token scope — --trust-github-token overrides"
+
+output_trust=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image) shift; case "$1" in inspect) return 0 ;; *) return 1 ;; esac ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      run) echo "DOCKER_RUN: $*"; exit 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *-o\ /dev/null*) echo "200"; return 0 ;;
+      *-I*|*-sI*) echo "HTTP/2 200"; echo "x-oauth-scopes: repo, delete_repo, admin:org"; echo ""; return 0 ;;
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails --trust-github-token 2>&1
+' 2>&1 || true)
+
+assert_contains "Trust flag shows proceeding message" "$output_trust" "Proceeding"
+assert_contains "Trust flag reaches launch" "$output_trust" "Launching Claude Code"
+assert_not_contains "Trust flag does not block" "$output_trust" "Refusing to proceed"
+
+section "GitHub token scope — safe token passes without flag"
+
+output_safe=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image) shift; case "$1" in inspect) return 0 ;; *) return 1 ;; esac ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      run) echo "DOCKER_RUN: $*"; exit 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *-o\ /dev/null*) echo "200"; return 0 ;;
+      *-I*|*-sI*) echo "HTTP/2 200"; echo "x-oauth-scopes: repo, read:org"; echo ""; return 0 ;;
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "Safe token reaches launch" "$output_safe" "Launching Claude Code"
+assert_not_contains "Safe token shows no scope warning" "$output_safe" "broad scopes"
+
+########################################
 # Summary
 ########################################
 
