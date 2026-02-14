@@ -1,6 +1,6 @@
 # claude-yolo
 
-Run Claude Code in an isolated Docker container with `--dangerously-skip-permissions`.
+Run Claude Code in an isolated Docker container with `--dangerously-skip-permissions`. Auto-detects your stack, injects GitHub credentials, and manages persistent dependency caches — so Claude has real tools and full autonomy without touching your host.
 
 ## What it does
 
@@ -62,10 +62,15 @@ cc --yolo --verbose
 | Flag | Description |
 |------|-------------|
 | `--yolo` | Run in Docker container with full permission bypass |
-| `--strategy <name>` | Skip auto-detection, use the specified strategy (rails, android, ...) |
+| `--strategy <name>` | Skip auto-detection, use the specified strategy |
 | `--build` | Force rebuild the Docker image before running |
 | `--verbose` | Show raw Docker build output instead of the spinner |
 | `--chrome` | Launch Chrome on the host and inject a `chrome-devtools` MCP server into the container |
+| `--env KEY=VALUE` | Inject an env var into the container (repeatable) |
+| `--env-file <path>` | Inject env vars from a dotenv-style file (repeatable) |
+| `-p`, `--print` | Headless mode — drop TTY, pass `-p` to Claude |
+| `--trust-github-token` | Proceed even if the GitHub token has broad scopes |
+| `-h`, `--help` | Show help and exit |
 
 ## GitHub Token
 
@@ -126,6 +131,44 @@ Or set `ANDROID_DEVICE=<ip>:<port>` before running to auto-connect:
 ```bash
 ANDROID_DEVICE=192.168.1.42:5555 cc --yolo
 ```
+
+### Python
+
+Detected by: `pyproject.toml`, `requirements.txt`, `setup.py`, `.python-version`, `Pipfile`
+
+Container includes:
+- Python (auto-detected version, installed via pyenv)
+- pip, poetry, uv, pipenv (auto-detected from lockfiles)
+- Common native build dependencies (libpq, libffi, etc.)
+
+### Node.js / TypeScript
+
+Detected by: `package.json`, `tsconfig.json`, `.nvmrc`, `.node-version`, lockfiles
+
+Container includes:
+- Node.js (auto-detected version, installed via nvm)
+- npm, yarn, pnpm, bun (auto-detected from lockfiles)
+- TypeScript support
+
+### Go
+
+Detected by: `go.mod`, `go.sum`, `main.go`, `cmd/`, `.go-version`
+
+Container includes:
+- Go (auto-detected version)
+- Module support, `go test`, `go vet`
+
+### Rust
+
+Detected by: `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `rust-toolchain`
+
+Container includes:
+- Rust (stable toolchain via rustup)
+- Cargo, clippy, rustfmt
+
+### Generic
+
+Manually selected — no auto-detection. A minimal container with GitHub CLI and no language runtime, useful for planning, research, and code review.
 
 ### Unknown Projects
 
