@@ -3,7 +3,10 @@
 # claude-yolo: Run Claude Code in an isolated Docker container with --dangerously-skip-permissions
 #
 # Usage:
-#   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome] [claude args...]
+#   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
+#              [--env KEY=VALUE]... [--env-file <path>]...
+#              [--trust-github-token]
+#              [-p <prompt>] [claude args...]
 #
 # Flags:
 #   --yolo              Run in Docker container with full permission bypass
@@ -11,6 +14,10 @@
 #   --build             Force rebuild the Docker image before running
 #   --verbose           Show raw Docker build output instead of spinner
 #   --chrome            Enable Chrome DevTools MCP server for browser control
+#   --env KEY=VALUE     Inject env var into the container (repeatable)
+#   --env-file <path>   Inject env vars from a dotenv-style file (repeatable)
+#   --trust-github-token  Skip broad-scope GitHub token warnings
+#   -p, --print         Run Claude in headless print mode (non-interactive)
 #
 # Without --yolo, passes through to the native claude command.
 
@@ -285,6 +292,46 @@ validate_github_token() {
   [[ "$http_code" == "200" ]]
 }
 
+# Broad scopes that are dangerous to hand to an unsupervised AI
+BROAD_TOKEN_SCOPES="delete_repo admin:org admin:enterprise admin:gpg_key admin:public_key admin:ssh_signing_key"
+
+check_github_token_scopes() {
+  local token="$1"
+  local headers
+  headers=$(curl -sI --connect-timeout 5 --max-time 10 \
+    -H "Authorization: token $token" \
+    https://api.github.com/user 2>/dev/null) || return 0
+
+  local scopes_header
+  scopes_header=$(echo "$headers" | grep -i '^x-oauth-scopes:' | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r' || true)
+
+  # Fine-grained tokens have no X-OAuth-Scopes header — they're safe by design
+  if [[ -z "$scopes_header" ]]; then
+    return 0
+  fi
+
+  _GITHUB_TOKEN_SCOPES="$scopes_header"
+
+  local found_broad=()
+  for scope in $BROAD_TOKEN_SCOPES; do
+    if echo ",$scopes_header," | grep -qi ",${scope}," 2>/dev/null || \
+       echo ", $scopes_header," | grep -qi ", ${scope}," 2>/dev/null || \
+       echo "$scopes_header" | grep -qi "\\b${scope}\\b" 2>/dev/null; then
+      found_broad+=("$scope")
+    fi
+  done
+
+  if [[ ${#found_broad[@]} -gt 0 ]]; then
+    _BROAD_SCOPES="${found_broad[*]}"
+    return 1
+  fi
+
+  return 0
+}
+
+_GITHUB_TOKEN_SCOPES=""
+_BROAD_SCOPES=""
+
 ensure_github_token() {
   local worktree_path="$1"
 
@@ -316,6 +363,21 @@ ensure_github_token() {
     fail "GitHub token invalid (${_GITHUB_TOKEN_SOURCE})"
     dim "Verify: GH_TOKEN=\$GH_TOKEN gh auth status"
     exit 1
+  fi
+
+  if ! check_github_token_scopes "$_GITHUB_TOKEN"; then
+    warn "GitHub token has broad scopes: ${BOLD}${_BROAD_SCOPES}${RESET}"
+    dim "These scopes give the AI access to dangerous operations."
+    dim "Token source: ${_GITHUB_TOKEN_SOURCE}"
+    echo "" >&2
+    if [[ "$trust_github_token" == true ]]; then
+      dim "Proceeding (--trust-github-token)"
+    else
+      fail "Refusing to proceed with broad-scope token"
+      dim "To accept the risk, re-run with:"
+      dim "  cc --yolo --trust-github-token"
+      exit 1
+    fi
   fi
 
   success "GitHub token ${DIM}(${_GITHUB_TOKEN_SOURCE})${RESET}"
@@ -708,8 +770,16 @@ run_with_strategy() {
   docker rm "$container_name" 2>/dev/null || true
 
   # Build the docker run command
+  # Use -it for interactive, just -i for piped stdin, neither for headless -p mode
+  local -a tty_flags=(-it)
+  if [[ "$headless_mode" == true ]]; then
+    tty_flags=()
+  elif ! [[ -t 0 ]]; then
+    tty_flags=(-i)
+  fi
+
   local -a docker_args=(
-    docker run -it --rm
+    docker run ${tty_flags[@]+"${tty_flags[@]}"} --rm
     --name "$container_name"
     --network=host
     -v "${worktree_path}:/workspace"
@@ -734,6 +804,27 @@ run_with_strategy() {
   if [[ -n "$platform" ]]; then
     docker_args+=(--platform "$platform")
   fi
+
+  # User-specified env vars (--env KEY=VALUE)
+  for env_pair in ${extra_env[@]+"${extra_env[@]}"}; do
+    docker_args+=(-e "$env_pair")
+  done
+
+  # User-specified env files (--env-file PATH)
+  for env_file in ${env_files[@]+"${env_files[@]}"}; do
+    while IFS= read -r line; do
+      # Skip comments and blank lines
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      # Strip optional 'export ' prefix
+      line="${line#export }"
+      # Strip surrounding quotes from value
+      local key="${line%%=*}"
+      local val="${line#*=}"
+      val="${val#\"}" && val="${val%\"}"
+      val="${val#\'}" && val="${val%\'}"
+      docker_args+=(-e "${key}=${val}")
+    done < "$env_file"
+  done
 
   # Mount git config read-only
   if [[ -f "${HOME}/.gitconfig" ]]; then
@@ -923,7 +1014,14 @@ attach_to_container() {
   dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
   success "Attaching"
   footer
-  exec docker exec -it \
+  local -a exec_tty_flags=(-it)
+  if [[ "$headless_mode" == true ]]; then
+    exec_tty_flags=()
+  elif ! [[ -t 0 ]]; then
+    exec_tty_flags=(-i)
+  fi
+
+  exec docker exec ${exec_tty_flags[@]+"${exec_tty_flags[@]}"} \
     -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)" \
     -e "LINES=$(tput lines 2>/dev/null || echo 40)" \
     --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
@@ -939,6 +1037,10 @@ main() {
   local force_strategy=""
   local verbose=false
   local chrome_mode=false
+  local headless_mode=false
+  local trust_github_token=false
+  local -a extra_env=()
+  local -a env_files=()
   local claude_args=()
 
   while [[ $# -gt 0 ]]; do
@@ -962,6 +1064,26 @@ main() {
         ;;
       --chrome)
         chrome_mode=true
+        shift
+        ;;
+      --env)
+        [[ $# -ge 2 ]] || { fail "--env requires a KEY=VALUE argument"; exit 1; }
+        extra_env+=("$2")
+        shift 2
+        ;;
+      --env-file)
+        [[ $# -ge 2 ]] || { fail "--env-file requires a path argument"; exit 1; }
+        [[ -f "$2" ]] || { fail "--env-file: file not found: $2"; exit 1; }
+        env_files+=("$2")
+        shift 2
+        ;;
+      --trust-github-token)
+        trust_github_token=true
+        shift
+        ;;
+      -p|--print)
+        headless_mode=true
+        claude_args+=("$1")
         shift
         ;;
       *)
