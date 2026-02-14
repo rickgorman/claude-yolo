@@ -409,21 +409,6 @@ check_yolo_config() {
     return 0
   fi
 
-  # Skip trust check if .yolo/ only contains credentials and gitignore
-  local has_config_files=false
-  for f in "$yolo_dir"/*; do
-    [[ -f "$f" ]] || continue
-    local basename
-    basename=$(basename "$f")
-    if [[ "$basename" != "credentials.json" && "$basename" != ".gitignore" ]]; then
-      has_config_files=true
-      break
-    fi
-  done
-  if [[ "$has_config_files" == false ]]; then
-    return 0
-  fi
-
   # Compute combined hash of all .yolo/ files
   local combined=""
   for f in "$yolo_dir"/*; do
@@ -929,24 +914,11 @@ run_setup_token() {
   local verbose="$2"
   local worktree_path
   worktree_path=$(get_worktree_path)
-  local hash
-  hash=$(path_hash "$worktree_path")
   local image_name="claude-yolo-${strategy}"
 
   # Ensure strategy image exists
   if ! image_exists "$image_name"; then
     build_strategy_image "$strategy" "$verbose"
-  fi
-
-  # Ensure .yolo/ directory exists
-  local yolo_dir="${worktree_path}/.yolo"
-  mkdir -p "$yolo_dir"
-
-  # Ensure .yolo/.gitignore contains credentials.json
-  local gitignore="${yolo_dir}/.gitignore"
-  if [[ ! -f "$gitignore" ]] || ! grep -qF 'credentials.json' "$gitignore" 2>/dev/null; then
-    echo "credentials.json" >> "$gitignore"
-    success "Added credentials.json to .yolo/.gitignore"
   fi
 
   # Create temp directory for Claude credentials
@@ -984,10 +956,11 @@ run_setup_token() {
 
   "${docker_args[@]}"
 
-  # Check if credentials were created
+  # Check if credentials were created and copy to host
   if [[ -f "${tmp_claude_dir}/.credentials.json" ]]; then
-    cp "${tmp_claude_dir}/.credentials.json" "${yolo_dir}/credentials.json"
-    success "Credentials saved to .yolo/credentials.json"
+    mkdir -p "${HOME}/.claude"
+    cp "${tmp_claude_dir}/.credentials.json" "${HOME}/.claude/.credentials.json"
+    success "Credentials saved to ~/.claude/.credentials.json"
   else
     fail "No credentials file was created"
     dim "The setup-token process may not have completed successfully."
@@ -1069,10 +1042,14 @@ run_with_strategy() {
     -w /workspace
   )
 
-  # Project-level Claude credentials (.yolo/credentials.json)
-  if [[ -f "${worktree_path}/.yolo/credentials.json" ]]; then
-    docker_args+=(-v "${worktree_path}/.yolo/credentials.json:/home/claude/.claude/.credentials.json:ro")
-    success "Using project credentials ${DIM}(.yolo/credentials.json)${RESET}"
+  # Claude OAuth token for container authentication
+  local oauth_token=""
+  if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
+    oauth_token=$(grep -o '"accessToken":"[^"]*"' "${HOME}/.claude/.credentials.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  fi
+  if [[ -n "$oauth_token" ]]; then
+    docker_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${oauth_token}")
+    success "Claude OAuth token injected"
   fi
 
   # GitHub token for gh CLI inside container
@@ -1532,20 +1509,9 @@ main() {
     exit 0
   fi
 
-  # Ensure Claude credentials exist for the container
-  if [[ ! -f "${worktree_path}/.yolo/credentials.json" ]]; then
-    if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
-      # Copy host credentials to .yolo/ for container use
-      mkdir -p "${worktree_path}/.yolo"
-      cp "${HOME}/.claude/.credentials.json" "${worktree_path}/.yolo/credentials.json"
-      local gitignore="${worktree_path}/.yolo/.gitignore"
-      if [[ ! -f "$gitignore" ]] || ! grep -qF 'credentials.json' "$gitignore" 2>/dev/null; then
-        echo "credentials.json" >> "$gitignore"
-      fi
-      success "Copied Claude credentials to .yolo/"
-    else
-      warn "No Claude credentials found. Run ${BOLD}cc --yolo --setup-token${RESET} to set up authentication."
-    fi
+  # Check for Claude credentials on host
+  if [[ ! -f "${HOME}/.claude/.credentials.json" ]]; then
+    warn "No Claude credentials found. Run ${BOLD}claude setup-token${RESET} or ${BOLD}cc --yolo --setup-token${RESET} to authenticate."
   fi
 
   # Ensure GitHub token for gh CLI inside container
