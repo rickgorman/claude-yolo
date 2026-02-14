@@ -409,6 +409,21 @@ check_yolo_config() {
     return 0
   fi
 
+  # Skip trust check if .yolo/ only contains credentials and gitignore
+  local has_config_files=false
+  for f in "$yolo_dir"/*; do
+    [[ -f "$f" ]] || continue
+    local basename
+    basename=$(basename "$f")
+    if [[ "$basename" != "credentials.json" && "$basename" != ".gitignore" ]]; then
+      has_config_files=true
+      break
+    fi
+  done
+  if [[ "$has_config_files" == false ]]; then
+    return 0
+  fi
+
   # Compute combined hash of all .yolo/ files
   local combined=""
   for f in "$yolo_dir"/*; do
@@ -1515,6 +1530,26 @@ main() {
     run_setup_token "$strategy" "$verbose"
     footer
     exit 0
+  fi
+
+  # Ensure Claude credentials exist for the container
+  if [[ ! -f "${worktree_path}/.yolo/credentials.json" ]]; then
+    if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
+      # Copy host credentials to .yolo/ for container use
+      mkdir -p "${worktree_path}/.yolo"
+      cp "${HOME}/.claude/.credentials.json" "${worktree_path}/.yolo/credentials.json"
+      local gitignore="${worktree_path}/.yolo/.gitignore"
+      if [[ ! -f "$gitignore" ]] || ! grep -qF 'credentials.json' "$gitignore" 2>/dev/null; then
+        echo "credentials.json" >> "$gitignore"
+      fi
+      success "Copied Claude credentials to .yolo/"
+    else
+      info "No Claude credentials found — running setup-token"
+      run_setup_token "$strategy" "$verbose" || {
+        fail "Setup-token failed. Run ${BOLD}cc --yolo --setup-token${RESET} to retry."
+        exit 1
+      }
+    fi
   fi
 
   # Ensure GitHub token for gh CLI inside container

@@ -1026,12 +1026,13 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/curl"
 
-# Set up fake HOME with commands directory and settings files
+# Set up fake HOME with commands directory, settings files, and credentials
 FAKE_HOME="$TMPDIR_BASE/fake-claude-home"
 mkdir -p "$FAKE_HOME/.claude/commands"
 echo "test" > "$FAKE_HOME/.claude/commands/test.md"
 echo '{}' > "$FAKE_HOME/.claude/settings.json"
 echo '{}' > "$FAKE_HOME/.claude/settings.local.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$FAKE_HOME/.claude/.credentials.json"
 
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
@@ -2327,6 +2328,7 @@ EOF
 YOLO_ENV_DOCKER_LOG="$TMPDIR_BASE/docker-yolo-env.log"
 YOLO_ENV_TRUST_DIR="$TMPDIR_BASE/yolo-env-trust-home"
 mkdir -p "$YOLO_ENV_TRUST_DIR/.claude"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$YOLO_ENV_TRUST_DIR/.claude/.credentials.json"
 
 cat > "$MOCK_BIN/docker" << MOCKEOF
 #!/usr/bin/env bash
@@ -2535,6 +2537,7 @@ output_trust_yolo=$(bash -c '
   cd "'"$YOLO_ENV_DIR"'"
   HOME="'"$TMPDIR_BASE/trust-yolo-test-home"'"
   mkdir -p "$HOME/.claude"
+  echo '"'"'{"claudeAiOauth":{"accessToken":"fake-test-token"}}'"'"' > "$HOME/.claude/.credentials.json"
   bash "'"$CLI"'" --yolo --strategy generic --trust-yolo 2>&1
 ' 2>&1 || true)
 
@@ -2599,6 +2602,7 @@ EOF
 YOLO_DOCKERFILE_DOCKER_LOG="$TMPDIR_BASE/docker-yolo-dockerfile.log"
 YOLO_DOCKERFILE_HOME="$TMPDIR_BASE/yolo-dockerfile-home"
 mkdir -p "$YOLO_DOCKERFILE_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$YOLO_DOCKERFILE_HOME/.claude/.credentials.json"
 
 _dockerfile_build_called=false
 cat > "$MOCK_BIN/docker" << MOCKEOF
