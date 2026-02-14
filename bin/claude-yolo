@@ -6,6 +6,7 @@
 #   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
 #              [--env KEY=VALUE]... [--env-file <path>]...
 #              [--trust-github-token] [--trust-yolo] [--reset]
+#              [--setup-token]
 #              [-p <prompt>] [claude args...]
 #
 # Flags:
@@ -19,6 +20,7 @@
 #   --trust-github-token  Skip broad-scope GitHub token warnings
 #   --trust-yolo        Skip .yolo/ directory trust prompt
 #   --reset             Remove existing container and recreate from image
+#   --setup-token       Run Claude OAuth setup and save credentials to .yolo/
 #   -p, --print         Run Claude in headless print mode (non-interactive)
 #
 # Without --yolo, passes through to the native claude command.
@@ -904,6 +906,81 @@ build_project_image() {
 }
 
 ########################################
+# Claude OAuth token setup
+########################################
+
+run_setup_token() {
+  local strategy="$1"
+  local verbose="$2"
+  local worktree_path
+  worktree_path=$(get_worktree_path)
+  local hash
+  hash=$(path_hash "$worktree_path")
+  local image_name="claude-yolo-${strategy}"
+
+  # Ensure strategy image exists
+  if ! image_exists "$image_name"; then
+    build_strategy_image "$strategy" "$verbose"
+  fi
+
+  # Ensure .yolo/ directory exists
+  local yolo_dir="${worktree_path}/.yolo"
+  mkdir -p "$yolo_dir"
+
+  # Ensure .yolo/.gitignore contains credentials.json
+  local gitignore="${yolo_dir}/.gitignore"
+  if [[ ! -f "$gitignore" ]] || ! grep -qF 'credentials.json' "$gitignore" 2>/dev/null; then
+    echo "credentials.json" >> "$gitignore"
+    success "Added credentials.json to .yolo/.gitignore"
+  fi
+
+  # Create temp directory for Claude credentials
+  local tmp_claude_dir
+  tmp_claude_dir=$(mktemp -d "${TMPDIR:-/tmp}/claude-yolo-setup-XXXXXX")
+  trap 'rm -rf "$tmp_claude_dir"' RETURN
+
+  info "Running ${BOLD}claude setup-token${RESET} in container"
+  echo "" >&2
+  dim "This will open a browser-based OAuth flow."
+  dim "Follow the prompts to authenticate your Claude account."
+  echo "" >&2
+
+  # Platform
+  local platform=""
+  if [[ -f "$STRATEGIES_DIR/$strategy/platform" ]]; then
+    platform=$(cat "$STRATEGIES_DIR/$strategy/platform" | tr -d '[:space:]')
+  fi
+
+  local -a docker_args=(
+    docker run -it --rm
+    --network=host
+    -v "${tmp_claude_dir}:/home/claude/.claude"
+    -w /workspace
+  )
+
+  if [[ -n "$platform" ]]; then
+    docker_args+=(--platform "$platform")
+  fi
+
+  docker_args+=(
+    "${image_name}:latest"
+    claude setup-token
+  )
+
+  "${docker_args[@]}"
+
+  # Check if credentials were created
+  if [[ -f "${tmp_claude_dir}/.credentials.json" ]]; then
+    cp "${tmp_claude_dir}/.credentials.json" "${yolo_dir}/credentials.json"
+    success "Credentials saved to .yolo/credentials.json"
+  else
+    fail "No credentials file was created"
+    dim "The setup-token process may not have completed successfully."
+    return 1
+  fi
+}
+
+########################################
 # Container execution
 ########################################
 
@@ -976,6 +1053,12 @@ run_with_strategy() {
     -e "LINES=$(tput lines 2>/dev/null || echo 40)"
     -w /workspace
   )
+
+  # Project-level Claude credentials (.yolo/credentials.json)
+  if [[ -f "${worktree_path}/.yolo/credentials.json" ]]; then
+    docker_args+=(-v "${worktree_path}/.yolo/credentials.json:/home/claude/.claude/.credentials.json:ro")
+    success "Using project credentials ${DIM}(.yolo/credentials.json)${RESET}"
+  fi
 
   # GitHub token for gh CLI inside container
   if [[ -n "$_GITHUB_TOKEN" ]]; then
@@ -1279,6 +1362,7 @@ main() {
   local trust_github_token=false
   local trust_yolo=false
   local reset_mode=false
+  local setup_token_mode=false
   local -a extra_env=()
   local -a env_files=()
   local claude_args=()
@@ -1327,6 +1411,10 @@ main() {
         ;;
       --reset)
         reset_mode=true
+        shift
+        ;;
+      --setup-token)
+        setup_token_mode=true
         shift
         ;;
       -p|--print)
@@ -1408,6 +1496,13 @@ main() {
       exit 0
     fi
     [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
+  fi
+
+  # --setup-token: run interactive OAuth setup and exit
+  if [[ "$setup_token_mode" == true ]]; then
+    run_setup_token "$strategy" "$verbose"
+    footer
+    exit 0
   fi
 
   # Ensure GitHub token for gh CLI inside container

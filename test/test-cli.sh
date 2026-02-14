@@ -2645,6 +2645,203 @@ assert_contains ".yolo/Dockerfile triggers project image build" "$output" "Build
 assert_contains ".yolo/Dockerfile build uses -f flag" "$yolo_dockerfile_log" ".yolo/Dockerfile"
 
 ########################################
+# Tests: --setup-token flag parsing
+########################################
+
+section "--setup-token flag parsing"
+
+SETUP_TOKEN_DIR="$TMPDIR_BASE/setup-token-project"
+mkdir -p "$SETUP_TOKEN_DIR"
+touch "$SETUP_TOKEN_DIR/Gemfile"
+
+SETUP_TOKEN_HOME="$TMPDIR_BASE/setup-token-home"
+mkdir -p "$SETUP_TOKEN_HOME/.claude"
+
+SETUP_TOKEN_DOCKER_LOG="$TMPDIR_BASE/docker-setup-token.log"
+
+# Mock docker that records run commands and simulates claude setup-token
+# creating a credentials file in the mounted temp dir
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run)
+    echo "\$*" > "$SETUP_TOKEN_DOCKER_LOG"
+    # Find the -v mount for /home/claude/.claude and create credentials there
+    for arg in "\$@"; do
+      if [[ "\$arg" == *":/home/claude/.claude" ]]; then
+        local_dir="\${arg%%:*}"
+        mkdir -p "\$local_dir"
+        echo '{"claudeAiOauth":{"accessToken":"test-token"}}' > "\$local_dir/.credentials.json"
+      fi
+    done
+    exit 0
+    ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output_setup_token=$(cd "$SETUP_TOKEN_DIR" && \
+  HOME="$SETUP_TOKEN_HOME" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic --setup-token 2>&1 || true)
+
+setup_token_docker_args=$(cat "$SETUP_TOKEN_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_contains "--setup-token runs claude setup-token in container" "$setup_token_docker_args" "claude setup-token"
+assert_contains "--setup-token uses --rm flag" "$setup_token_docker_args" "--rm"
+assert_contains "--setup-token mounts temp dir for credentials" "$setup_token_docker_args" ":/home/claude/.claude"
+
+# Verify credentials were copied to .yolo/
+if [[ -f "$SETUP_TOKEN_DIR/.yolo/credentials.json" ]]; then
+  pass "--setup-token copies credentials to .yolo/credentials.json"
+else
+  fail "--setup-token copies credentials to .yolo/credentials.json"
+fi
+
+# Verify .gitignore was created
+if [[ -f "$SETUP_TOKEN_DIR/.yolo/.gitignore" ]] && grep -qF "credentials.json" "$SETUP_TOKEN_DIR/.yolo/.gitignore"; then
+  pass "--setup-token creates .yolo/.gitignore with credentials.json"
+else
+  fail "--setup-token creates .yolo/.gitignore with credentials.json"
+fi
+
+assert_contains "--setup-token shows success message" "$output_setup_token" "Credentials saved"
+
+########################################
+# Tests: .yolo/credentials.json mount
+########################################
+
+section ".yolo/credentials.json mount in docker run"
+
+CREDS_MOUNT_DIR="$TMPDIR_BASE/creds-mount-project"
+mkdir -p "$CREDS_MOUNT_DIR/.yolo"
+echo '{"claudeAiOauth":{"accessToken":"project-token"}}' > "$CREDS_MOUNT_DIR/.yolo/credentials.json"
+touch "$CREDS_MOUNT_DIR/Gemfile"
+
+CREDS_MOUNT_HOME="$TMPDIR_BASE/creds-mount-home"
+mkdir -p "$CREDS_MOUNT_HOME/.claude"
+
+CREDS_MOUNT_DOCKER_LOG="$TMPDIR_BASE/docker-creds-mount.log"
+
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$CREDS_MOUNT_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output_creds=$(cd "$CREDS_MOUNT_DIR" && \
+  HOME="$CREDS_MOUNT_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic --trust-yolo 2>&1 || true)
+
+creds_mount_docker_args=$(cat "$CREDS_MOUNT_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_contains ".yolo/credentials.json mounted in container" "$creds_mount_docker_args" "credentials.json:/home/claude/.claude/.credentials.json:ro"
+assert_contains ".yolo/credentials.json shows success message" "$output_creds" "Using project credentials"
+
+########################################
+# Tests: no credentials mount without file
+########################################
+
+section "No credentials mount without .yolo/credentials.json"
+
+NO_CREDS_DIR="$TMPDIR_BASE/no-creds-project"
+mkdir -p "$NO_CREDS_DIR"
+touch "$NO_CREDS_DIR/Gemfile"
+
+NO_CREDS_HOME="$TMPDIR_BASE/no-creds-home"
+mkdir -p "$NO_CREDS_HOME/.claude"
+
+NO_CREDS_DOCKER_LOG="$TMPDIR_BASE/docker-no-creds.log"
+
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$NO_CREDS_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output_no_creds=$(cd "$NO_CREDS_DIR" && \
+  HOME="$NO_CREDS_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic 2>&1 || true)
+
+no_creds_docker_args=$(cat "$NO_CREDS_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_not_contains "No credentials mount without .yolo/credentials.json" "$no_creds_docker_args" ".credentials.json"
+assert_not_contains "No credentials message without file" "$output_no_creds" "Using project credentials"
+
+########################################
+# Tests: --setup-token gitignore idempotency
+########################################
+
+section "--setup-token .gitignore idempotency"
+
+GITIGNORE_DIR="$TMPDIR_BASE/gitignore-idem-project"
+mkdir -p "$GITIGNORE_DIR/.yolo"
+echo "credentials.json" > "$GITIGNORE_DIR/.yolo/.gitignore"
+touch "$GITIGNORE_DIR/Gemfile"
+
+GITIGNORE_HOME="$TMPDIR_BASE/gitignore-idem-home"
+mkdir -p "$GITIGNORE_HOME/.claude"
+
+# Reuse setup-token mock
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run)
+    for arg in "\$@"; do
+      if [[ "\$arg" == *":/home/claude/.claude" ]]; then
+        local_dir="\${arg%%:*}"
+        mkdir -p "\$local_dir"
+        echo '{"test":"token"}' > "\$local_dir/.credentials.json"
+      fi
+    done
+    exit 0
+    ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+cd "$GITIGNORE_DIR" && \
+  HOME="$GITIGNORE_HOME" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic --setup-token >/dev/null 2>&1 || true
+
+# Count how many times credentials.json appears in .gitignore
+gitignore_count=$(grep -c "credentials.json" "$GITIGNORE_DIR/.yolo/.gitignore" 2>/dev/null || echo "0")
+assert_eq "--setup-token does not duplicate .gitignore entry" "1" "$gitignore_count"
+
+########################################
 # Summary
 ########################################
 
