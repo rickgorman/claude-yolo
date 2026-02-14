@@ -1544,11 +1544,7 @@ main() {
       fi
       success "Copied Claude credentials to .yolo/"
     else
-      info "No Claude credentials found — running setup-token"
-      run_setup_token "$strategy" "$verbose" || {
-        fail "Setup-token failed. Run ${BOLD}cc --yolo --setup-token${RESET} to retry."
-        exit 1
-      }
+      warn "No Claude credentials found. Run ${BOLD}cc --yolo --setup-token${RESET} to set up authentication."
     fi
   fi
 
