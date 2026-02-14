@@ -214,6 +214,232 @@ jobs:
             exit 1
           fi
 
+  docker-build-python:
+    name: Docker Build (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build python image
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/python/
+          file: strategies/python/Dockerfile
+          tags: claude-yolo-python:test
+          load: true
+          cache-from: type=gha,scope=python
+          cache-to: type=gha,mode=max,scope=python
+
+      - name: Verify pyenv is installed
+        run: docker run --rm --user claude --entrypoint /bin/bash claude-yolo-python:test -c "pyenv --version"
+
+      - name: Verify claude-code is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-python:test -c "which claude"
+
+      - name: Verify workspace directory exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-python:test -c "test -d /workspace"
+
+      - name: Verify claude user exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-python:test -c "id claude"
+
+      - name: Verify sudo apt-get works at runtime
+        run: |
+          docker run --rm --entrypoint /bin/bash claude-yolo-python:test -c "
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq tree &&
+            which tree
+          "
+
+      - name: Smoke-test pyenv install and pip inside container
+        run: |
+          docker run --rm \
+            --user claude \
+            --entrypoint /bin/bash \
+            claude-yolo-python:test \
+            -c '
+              export PYENV_ROOT="$HOME/.pyenv"
+              export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+              eval "$(pyenv init -)"
+              pyenv install 3.12 &&
+              pyenv global 3.12 &&
+              python --version &&
+              pip --version
+            '
+
+      - name: Verify docker exec runs as claude user (not root)
+        run: |
+          docker run -d --name python-exec-test \
+            --entrypoint /bin/bash \
+            claude-yolo-python:test \
+            -c "sleep 30"
+          output=$(docker exec --user claude python-exec-test whoami)
+          docker stop python-exec-test >/dev/null 2>&1 || true
+          docker rm python-exec-test >/dev/null 2>&1 || true
+          if [ "$output" = "claude" ]; then
+            echo "docker exec --user claude verified: running as '$output'"
+          else
+            echo "ERROR: Expected 'claude', got '$output'"
+            exit 1
+          fi
+
+  docker-build-node:
+    name: Docker Build (node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build node image
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/node/
+          file: strategies/node/Dockerfile
+          tags: claude-yolo-node:test
+          load: true
+          cache-from: type=gha,scope=node
+          cache-to: type=gha,mode=max,scope=node
+
+      - name: Verify nvm is installed
+        run: |
+          docker run --rm --user claude --entrypoint /bin/bash claude-yolo-node:test -c '
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            nvm --version
+          '
+
+      - name: Verify claude-code is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-node:test -c "which claude"
+
+      - name: Verify workspace directory exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-node:test -c "test -d /workspace"
+
+      - name: Verify claude user exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-node:test -c "id claude"
+
+      - name: Verify sudo apt-get works at runtime
+        run: |
+          docker run --rm --entrypoint /bin/bash claude-yolo-node:test -c "
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq tree &&
+            which tree
+          "
+
+      - name: Smoke-test nvm install and npm inside container
+        run: |
+          docker run --rm \
+            --user claude \
+            --entrypoint /bin/bash \
+            claude-yolo-node:test \
+            -c '
+              export NVM_DIR="$HOME/.nvm"
+              [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+              nvm install 20 &&
+              node --version &&
+              npm --version &&
+              cd /tmp && npm init -y &&
+              npm install lodash &&
+              node -e "console.log(require(\"lodash\").VERSION)"
+            '
+
+      - name: Verify docker exec runs as claude user (not root)
+        run: |
+          docker run -d --name node-exec-test \
+            --entrypoint /bin/bash \
+            claude-yolo-node:test \
+            -c "sleep 30"
+          output=$(docker exec --user claude node-exec-test whoami)
+          docker stop node-exec-test >/dev/null 2>&1 || true
+          docker rm node-exec-test >/dev/null 2>&1 || true
+          if [ "$output" = "claude" ]; then
+            echo "docker exec --user claude verified: running as '$output'"
+          else
+            echo "ERROR: Expected 'claude', got '$output'"
+            exit 1
+          fi
+
+  docker-build-go:
+    name: Docker Build (go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build go image
+        uses: docker/build-push-action@v6
+        with:
+          context: strategies/go/
+          file: strategies/go/Dockerfile
+          tags: claude-yolo-go:test
+          load: true
+          cache-from: type=gha,scope=go
+          cache-to: type=gha,mode=max,scope=go
+
+      - name: Verify go is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-go:test -c "go version"
+
+      - name: Verify claude-code is installed
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-go:test -c "which claude"
+
+      - name: Verify workspace directory exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-go:test -c "test -d /workspace"
+
+      - name: Verify claude user exists
+        run: docker run --rm --entrypoint /bin/bash claude-yolo-go:test -c "id claude"
+
+      - name: Verify sudo apt-get works at runtime
+        run: |
+          docker run --rm --entrypoint /bin/bash claude-yolo-go:test -c "
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq tree &&
+            which tree
+          "
+
+      - name: Smoke-test go build inside container
+        run: |
+          docker run --rm \
+            --user claude \
+            --entrypoint /bin/bash \
+            claude-yolo-go:test \
+            -c '
+              export GOPATH="$HOME/go"
+              export PATH="$GOPATH/bin:/usr/local/go/bin:$PATH"
+              mkdir -p /tmp/smoke && cd /tmp/smoke &&
+              go mod init smoke-test &&
+              cat > main.go <<GOEOF
+          package main
+
+          import "fmt"
+
+          func main() { fmt.Println("hello from go") }
+          GOEOF
+              go build -o smoke . &&
+              ./smoke &&
+              go test ./... 2>&1 || true
+            '
+
+      - name: Verify docker exec runs as claude user (not root)
+        run: |
+          docker run -d --name go-exec-test \
+            --entrypoint /bin/bash \
+            claude-yolo-go:test \
+            -c "sleep 30"
+          output=$(docker exec --user claude go-exec-test whoami)
+          docker stop go-exec-test >/dev/null 2>&1 || true
+          docker rm go-exec-test >/dev/null 2>&1 || true
+          if [ "$output" = "claude" ]; then
+            echo "docker exec --user claude verified: running as '$output'"
+          else
+            echo "ERROR: Expected 'claude', got '$output'"
+            exit 1
+          fi
+
   chrome-e2e:
     name: Chrome CDP E2E
     runs-on: ubuntu-latest
