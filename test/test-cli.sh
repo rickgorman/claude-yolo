@@ -305,6 +305,16 @@ android_empty=$("$STRATEGIES_DIR/android/detect.sh" "$EMPTY_DIR" 2>/dev/null)
 android_empty_conf=$(echo "$android_empty" | grep '^CONFIDENCE:' | cut -d: -f2)
 assert_eq "Android detection 0% for empty dir" "0" "$android_empty_conf"
 
+section "Strategy detection — Generic"
+
+generic_output=$("$STRATEGIES_DIR/generic/detect.sh" "$RAILS_DIR" 2>/dev/null)
+generic_confidence=$(echo "$generic_output" | grep '^CONFIDENCE:' | cut -d: -f2)
+assert_eq "Generic detection always 0% (manual only)" "0" "$generic_confidence"
+
+generic_empty=$("$STRATEGIES_DIR/generic/detect.sh" "$EMPTY_DIR" 2>/dev/null)
+generic_empty_conf=$(echo "$generic_empty" | grep '^CONFIDENCE:' | cut -d: -f2)
+assert_eq "Generic detection 0% for empty dir" "0" "$generic_empty_conf"
+
 ########################################
 # Tests: run_detection integration
 ########################################
@@ -371,6 +381,7 @@ section "list_strategies"
 strategies=$(list_strategies)
 assert_contains "list_strategies includes rails" "$strategies" "rails"
 assert_contains "list_strategies includes android" "$strategies" "android"
+assert_contains "list_strategies includes generic" "$strategies" "generic"
 
 ########################################
 # Tests: Strategy description files
@@ -697,6 +708,47 @@ assert_contains "Shows worktree path" "$output" "Worktree"
 assert_contains "Shows escape hatch" "$output" "Ctrl+C to exit"
 assert_contains "Shows Launching message" "$output" "Launching Claude Code"
 assert_contains "Shows footer" "$output" "└"
+
+########################################
+# Tests: CLI integration — --strategy generic
+########################################
+
+section "CLI integration — --strategy generic"
+
+output_generic=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image)
+        shift
+        case "$1" in
+          inspect) return 0 ;;
+          *) return 1 ;;
+        esac
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      run) echo "DOCKER_RUN: $*" ; exit 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$EMPTY_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy generic 2>&1
+' 2>&1 || true)
+
+assert_contains "Generic shows worktree path" "$output_generic" "Worktree"
+assert_contains "Generic shows no language runtime" "$output_generic" "Generic"
+assert_contains "Generic shows Launching message" "$output_generic" "Launching Claude Code"
 
 ########################################
 # Tests: Rails strategy — DB_HOST
