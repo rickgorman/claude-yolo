@@ -111,9 +111,22 @@ cdp_port_for_hash() {
 # Docker helpers
 ########################################
 
-check_docker() {
-  if ! command -v docker &>/dev/null; then
-    fail "Docker is not installed. Install Docker Desktop and try again."
+check_dependencies() {
+  local missing=()
+
+  command -v docker &>/dev/null || missing+=("docker")
+  command -v git &>/dev/null    || missing+=("git")
+  command -v curl &>/dev/null   || missing+=("curl")
+  command -v tmux &>/dev/null   || missing+=("tmux")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    fail "Missing required dependencies: ${BOLD}${missing[*]}${RESET}"
+    echo "" >&2
+    if [[ "$(uname)" == "Darwin" ]]; then
+      dim "Install with: brew install ${missing[*]}"
+    else
+      dim "Install with: sudo apt-get install ${missing[*]}"
+    fi
     exit 1
   fi
 
@@ -283,16 +296,6 @@ find_github_token() {
     fi
   fi
 
-  # Try gh CLI keyring (macOS Keychain, etc.)
-  if command -v gh &>/dev/null; then
-    token=$(gh auth token 2>/dev/null) || true
-    if [[ -n "$token" ]]; then
-      _GITHUB_TOKEN="$token"
-      _GITHUB_TOKEN_SOURCE="gh auth token (keyring)"
-      return 0
-    fi
-  fi
-
   return 1
 }
 
@@ -363,7 +366,6 @@ ensure_github_token() {
     dim "  • ${worktree_path}/.env"
     dim "  • ~/.env"
     dim "  • ~/.config/gh/hosts.yml"
-    dim "  • gh auth token (keyring)"
     echo "" >&2
     dim "Set one with:"
     dim "  export GH_TOKEN=ghp_your_token_here"
@@ -915,13 +917,64 @@ run_setup_token() {
     return 1
   fi
 
-  info "Running ${BOLD}claude setup-token${RESET}"
+  info "Running ${BOLD}claude setup-token${RESET} in a tmux session"
   echo "" >&2
   dim "This will open a browser-based OAuth flow."
   dim "Follow the prompts to authenticate your Claude account."
+  dim "The tmux session will close automatically when done."
   echo "" >&2
 
-  claude setup-token
+  local session="claude-yolo-setup-$$"
+  local logfile
+  logfile=$(mktemp)
+  local creds_file="${HOME}/.claude/.credentials.json"
+
+  # Record credentials mtime so we can detect if claude wrote new ones
+  local creds_mtime_before=""
+  if [[ -f "$creds_file" ]]; then
+    creds_mtime_before=$(stat -f %m "$creds_file" 2>/dev/null || stat -c %Y "$creds_file" 2>/dev/null || true)
+  fi
+
+  # Kill any stale session with the same name
+  tmux kill-session -t "$session" 2>/dev/null || true
+
+  # Start a tmux session that runs setup-token then exits
+  # Unset CLAUDECODE to avoid nested-session detection if invoked from within Claude Code
+  tmux new-session -d -s "$session" -x 120 -y 40 \
+    "unset CLAUDECODE; claude setup-token; sleep 2; exit"
+
+  # Pipe all pane output to logfile for token capture
+  tmux pipe-pane -t "$session" -o "cat >> '$logfile'"
+
+  # Attach user so they can see the OAuth flow
+  tmux attach-session -t "$session" 2>/dev/null || true
+
+  # If user detached early, wait for session to finish
+  while tmux has-session -t "$session" 2>/dev/null; do
+    sleep 1
+  done
+
+  # Check if claude updated the credentials file directly
+  local creds_mtime_after=""
+  if [[ -f "$creds_file" ]]; then
+    creds_mtime_after=$(stat -f %m "$creds_file" 2>/dev/null || stat -c %Y "$creds_file" 2>/dev/null || true)
+  fi
+  local claude_wrote_creds=false
+  if [[ -n "$creds_mtime_after" && "$creds_mtime_before" != "$creds_mtime_after" ]]; then
+    claude_wrote_creds=true
+  fi
+
+  # Extract token from captured output (starts with sk-ant-)
+  local token
+  token=$(grep -o 'sk-ant-[a-zA-Z0-9_-]*' "$logfile" | head -1)
+  rm -f "$logfile"
+
+  # Save captured token only if claude didn't already write credentials
+  # (preserves refreshToken and other fields when claude handles it)
+  if [[ "$claude_wrote_creds" == false && -n "$token" ]]; then
+    mkdir -p "${HOME}/.claude"
+    printf '{"claudeAiOauth":{"accessToken":"%s"}}' "$token" > "$creds_file"
+  fi
 
   if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
     success "Credentials saved to ~/.claude/.credentials.json"
@@ -991,10 +1044,47 @@ run_with_strategy() {
     tty_flags=(-i)
   fi
 
+  # Collect port mappings: strategy defaults + .yolo/ports overrides
+  local -a port_flags=()
+
+  # On macOS, --network=host doesn't expose container ports to the host.
+  # Publish ports explicitly so services are reachable from the host browser.
+  if [[ "$(uname)" == "Darwin" ]]; then
+    # Strategy-specific default ports
+    case "$strategy" in
+      rails)  port_flags+=(-p 3000:3000 -p 5173:5173) ;;
+      node)   port_flags+=(-p 3000:3000 -p 5173:5173) ;;
+      python) port_flags+=(-p 8000:8000) ;;
+      go)     port_flags+=(-p 8080:8080) ;;
+      *)      ;;
+    esac
+
+    # .yolo/ports overrides (one port or host:container pair per line)
+    if [[ "${YOLO_CONFIG_LOADED}" == true && -f "${worktree_path}/.yolo/ports" ]]; then
+      port_flags=()  # reset defaults — project specifies its own
+      while IFS= read -r line; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        line=$(echo "$line" | tr -d '[:space:]')
+        if [[ "$line" == *:* ]]; then
+          port_flags+=(-p "$line")
+        else
+          port_flags+=(-p "${line}:${line}")
+        fi
+      done < "${worktree_path}/.yolo/ports"
+    fi
+  fi
+
+  # --network=host and -p are mutually exclusive; on macOS we need -p
+  local -a network_flags=(--network=host)
+  if [[ ${#port_flags[@]} -gt 0 ]]; then
+    network_flags=()
+  fi
+
   local -a docker_args=(
     docker run ${tty_flags[@]+"${tty_flags[@]}"}
     --name "$container_name"
-    --network=host
+    ${network_flags[@]+"${network_flags[@]}"}
+    ${port_flags[@]+"${port_flags[@]}"}
     -v "${worktree_path}:/workspace"
     -v "${HOME}/.claude:/home/claude/.claude"
     -v "${node_volume}:/workspace/node_modules"
@@ -1194,6 +1284,22 @@ run_with_strategy() {
       info "Go · modules"
       ;;
 
+    jekyll)
+      local ruby_version
+      ruby_version=$(detect_ruby_version "$worktree_path")
+      local gems_volume="claude-yolo-${hash}-gems"
+      local rbenv_volume="claude-yolo-${hash}-rbenv"
+
+      docker_args+=(
+        -v "${gems_volume}:/home/claude/.gems"
+        -v "${rbenv_volume}:/home/claude/.rbenv/versions"
+        -e "RUBY_VERSION=${ruby_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Jekyll · Ruby ${ruby_version}"
+      ;;
+
     generic)
       info "Worktree  ${display_worktree}"
       info "Generic · no language runtime"
@@ -1222,6 +1328,18 @@ run_with_strategy() {
 MCPEOF
     docker_args+=(-v "${mcp_config}:/home/claude/.mcp.json:ro")
     info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
+  fi
+
+  # Show published ports
+  if [[ ${#port_flags[@]} -gt 0 ]]; then
+    local ports_display=""
+    for pf in "${port_flags[@]}"; do
+      [[ "$pf" == "-p" ]] && continue
+      ports_display+="${pf} "
+    done
+    if [[ -n "$ports_display" ]]; then
+      info "Ports  ${DIM}${ports_display% }${RESET}"
+    fi
   fi
 
   dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
@@ -1453,7 +1571,7 @@ main() {
   fi
 
   # YOLO mode
-  check_docker
+  check_dependencies
   header
 
   local worktree_path
@@ -1516,11 +1634,9 @@ main() {
     [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
   fi
 
-  # --setup-token: run interactive OAuth setup and exit
+  # --setup-token: run interactive OAuth setup, then continue to launch
   if [[ "$setup_token_mode" == true ]]; then
-    run_setup_token
-    footer
-    exit 0
+    run_setup_token || { footer; exit 1; }
   fi
 
   # Check for Claude credentials on host
