@@ -1,0 +1,5 @@
+title: My Site
+remote_theme: some/theme
+markdown: kramdown
+plugins:
+  - jekyll-feed
