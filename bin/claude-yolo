@@ -1052,6 +1052,11 @@ run_with_strategy() {
     success "Claude OAuth token injected"
   fi
 
+  # Mount ~/.claude.json to skip onboarding in container
+  if [[ -f "${HOME}/.claude.json" ]]; then
+    docker_args+=(-v "${HOME}/.claude.json:/home/claude/.claude.json:ro")
+  fi
+
   # GitHub token for gh CLI inside container
   if [[ -n "$_GITHUB_TOKEN" ]]; then
     docker_args+=(
