@@ -1284,6 +1284,22 @@ run_with_strategy() {
       info "Go · modules"
       ;;
 
+    jekyll)
+      local ruby_version
+      ruby_version=$(detect_ruby_version "$worktree_path")
+      local gems_volume="claude-yolo-${hash}-gems"
+      local rbenv_volume="claude-yolo-${hash}-rbenv"
+
+      docker_args+=(
+        -v "${gems_volume}:/home/claude/.gems"
+        -v "${rbenv_volume}:/home/claude/.rbenv/versions"
+        -e "RUBY_VERSION=${ruby_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Jekyll · Ruby ${ruby_version}"
+      ;;
+
     generic)
       info "Worktree  ${display_worktree}"
       info "Generic · no language runtime"
