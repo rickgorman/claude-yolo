@@ -846,6 +846,8 @@ output=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   bash "'"$CLI"'" --yolo 2>&1
 ' 2>&1 || true)
 
@@ -862,6 +864,8 @@ output=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   bash "'"$CLI"'" --yolo --strategy nonexistent 2>&1
 ' 2>&1 || true)
 
@@ -879,6 +883,8 @@ output=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   cd "'"$EMPTY_DIR"'"
   echo "99" | bash "'"$CLI"'" --yolo 2>&1
 ' 2>&1 || true)
@@ -904,6 +910,8 @@ output=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   cd "'"$EMPTY_DIR"'"
   echo "abc" | bash "'"$CLI"'" --yolo 2>&1
 ' 2>&1 || true)
@@ -922,6 +930,8 @@ output=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   cd "'"$EMPTY_DIR"'"
   echo "99" | bash "'"$CLI"'" --yolo 2>&1
 ' 2>&1 || true)
@@ -950,6 +960,8 @@ output=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -992,6 +1004,8 @@ output_generic=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -1040,6 +1054,23 @@ case "$*" in
 esac
 MOCKEOF
 chmod +x "$MOCK_BIN/curl"
+
+# Create a mock lsof that always reports no ports in use
+cat > "$MOCK_BIN/lsof" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/lsof"
+
+# Create a mock ps for process name lookups in port conflict resolution
+cat > "$MOCK_BIN/ps" << 'MOCKEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *-o*comm*) echo "mock-process" ;;
+  *) command ps "$@" ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/ps"
 
 # Set up fake HOME with commands directory, settings files, and credentials
 FAKE_HOME="$TMPDIR_BASE/fake-claude-home"
@@ -1213,6 +1244,8 @@ _chrome_mock_prefix='
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
 '
 
 section "--chrome flag parsing"
@@ -1291,7 +1324,13 @@ section "--chrome docker run args structure"
 
 # Verify the exec'd command is a proper docker run with expected flags
 assert_contains "Exec'd command starts with docker" "$exec_cmd_line" "docker run"
-assert_contains "Docker run includes --network=host" "$exec_cmd_line" "--network=host"
+# On macOS, --network=host is replaced by -p port flags
+if [[ "$(uname)" == "Darwin" ]]; then
+  assert_contains "Docker run includes port publish flags (macOS)" "$exec_cmd_line" "-p"
+  assert_not_contains "Docker run omits --network=host (macOS)" "$exec_cmd_line" "--network=host"
+else
+  assert_contains "Docker run includes --network=host" "$exec_cmd_line" "--network=host"
+fi
 assert_contains "Docker run includes --dangerously-skip-permissions" "$exec_cmd_line" "--dangerously-skip-permissions"
 assert_contains "Docker run uses rails image" "$exec_cmd_line" "claude-yolo-rails"
 
@@ -1711,6 +1750,8 @@ output_no_token=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   HOME="'"$EMPTY_HOME"'"
   cd "'"$RAILS_DIR"'"
   bash "'"$CLI"'" --yolo --strategy rails 2>&1
@@ -1738,6 +1779,8 @@ output_bad_token=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "401"; return 0 ;;
@@ -1778,6 +1821,8 @@ output_no_github=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -1948,6 +1993,8 @@ PRINT_OUTPUT=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -1983,6 +2030,8 @@ PRINT_LONG_OUTPUT=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2006,6 +2055,8 @@ PRINT_NO_YOLO=$(bash -c '
   export -f exec
   docker() { return 1; }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   bash "'"$CLI"'" -p "just a prompt" 2>&1
 ' 2>&1 || true)
 
@@ -2079,6 +2130,8 @@ output_broad=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *-o\ /dev/null*) echo "200"; return 0 ;;
@@ -2114,6 +2167,8 @@ output_trust=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *-o\ /dev/null*) echo "200"; return 0 ;;
@@ -2147,6 +2202,8 @@ output_safe=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *-o\ /dev/null*) echo "200"; return 0 ;;
@@ -2222,6 +2279,8 @@ output_yolo_strategy=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2262,6 +2321,8 @@ output_bad_yolo_strategy=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2297,6 +2358,8 @@ output_flag_override=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2480,6 +2543,8 @@ output_reset=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2529,6 +2594,8 @@ output_trust_yolo=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2574,6 +2641,8 @@ output_persist=$(bash -c '
     esac
   }
   export -f docker
+  lsof() { return 1; }
+  export -f lsof
   curl() {
     case "$*" in
       *api.github.com*) echo "200"; return 0 ;;
@@ -2907,6 +2976,188 @@ section "No ~/.claude.json mount when file missing"
 
 # Reuse NO_CREDS_HOME which has no .claude.json
 assert_not_contains "No .claude.json mount without file" "$no_creds_docker_args" ".claude.json:/home/claude/.claude.json"
+
+########################################
+# Tests: check_port_in_use
+########################################
+
+section "check_port_in_use"
+
+# Mock lsof to simulate port 3000 in use
+lsof() {
+  case "$*" in
+    *:3000*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+check_port_in_use 3000 && result="in_use" || result="free"
+assert_eq "check_port_in_use detects occupied port" "in_use" "$result"
+
+check_port_in_use 4000 && result="in_use" || result="free"
+assert_eq "check_port_in_use reports free port" "free" "$result"
+
+unset -f lsof
+
+########################################
+# Tests: find_free_port
+########################################
+
+section "find_free_port"
+
+# Mock: port 3000 and 4000 in use — should skip +1000, find 3001
+lsof() {
+  case "$*" in
+    *:3000*|*:4000*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+suggested=$(find_free_port 3000)
+assert_eq "find_free_port skips +1000 when occupied, finds +1" "3001" "$suggested"
+
+unset -f lsof
+
+# Mock: only base port in use — should prefer +1000
+lsof() {
+  case "$*" in
+    *:3000*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+suggested=$(find_free_port 3000)
+assert_eq "find_free_port prefers +1000 when free" "4000" "$suggested"
+
+unset -f lsof
+
+########################################
+# Tests: resolve_port_conflicts — no conflicts
+########################################
+
+section "resolve_port_conflicts — no conflicts"
+
+RESOLVE_STDERR="$TMPDIR_BASE/resolve-stderr.log"
+
+lsof() { return 1; }
+
+resolve_port_conflicts false -p 3000:3000 -p 5173:5173 2>"$RESOLVE_STDERR"
+output=$(cat "$RESOLVE_STDERR")
+assert_eq "No output when no conflicts" "" "$output"
+assert_contains "Port flags unchanged (3000)" "${_RESOLVED_PORT_FLAGS[*]}" "3000:3000"
+assert_contains "Port flags unchanged (5173)" "${_RESOLVED_PORT_FLAGS[*]}" "5173:5173"
+
+unset -f lsof
+
+########################################
+# Tests: resolve_port_conflicts — auto-remap
+########################################
+
+section "resolve_port_conflicts — auto-remap"
+
+# Mock: port 3000 in use, 4000 free
+lsof() {
+  case "$*" in
+    *:3000*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Mock ps for process name display
+ps() { echo "ruby"; }
+
+resolve_port_conflicts true -p 3000:3000 -p 5173:5173 2>"$RESOLVE_STDERR"
+output=$(cat "$RESOLVE_STDERR")
+assert_contains "Auto-remap shows info message" "$output" "Auto-remapped"
+assert_contains "Auto-remap shows 3000 → 4000" "$output" "4000"
+assert_contains "Remapped port in resolved flags" "${_RESOLVED_PORT_FLAGS[*]}" "4000:3000"
+assert_contains "Non-conflicting port unchanged" "${_RESOLVED_PORT_FLAGS[*]}" "5173:5173"
+
+unset -f lsof ps
+
+########################################
+# Tests: resolve_port_conflicts — multiple conflicts
+########################################
+
+section "resolve_port_conflicts — multiple conflicts auto-remap"
+
+# Mock: both 3000 and 5173 in use
+lsof() {
+  case "$*" in
+    *:3000*|*:5173*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+ps() { echo "node"; }
+
+resolve_port_conflicts true -p 3000:3000 -p 5173:5173 2>"$RESOLVE_STDERR"
+output=$(cat "$RESOLVE_STDERR")
+assert_contains "Both ports remapped (3000)" "${_RESOLVED_PORT_FLAGS[*]}" "4000:3000"
+assert_contains "Both ports remapped (5173)" "${_RESOLVED_PORT_FLAGS[*]}" "6173:5173"
+assert_contains "Shows conflict for 3000" "$output" "3000"
+assert_contains "Shows conflict for 5173" "$output" "5173"
+
+unset -f lsof ps
+
+########################################
+# Tests: Port conflict in headless CLI mode
+########################################
+
+section "Port conflict auto-remap in headless CLI mode"
+
+output_port_conflict=$(bash -c '
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image) shift; case "$1" in inspect) return 0 ;; *) return 1 ;; esac ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      rm) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f docker
+  lsof() { return 1; }
+  export -f lsof
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  lsof() {
+    case "$*" in
+      *:3000*) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f lsof
+  ps() {
+    case "$*" in
+      *-o*comm*) echo "ruby" ;;
+      *) command ps "$@" ;;
+    esac
+  }
+  export -f ps
+  HOME="'"$FAKE_HOME"'"
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails -p "run tests" 2>&1
+' 2>&1 || true)
+
+port_conflict_exec_cmd=$(echo "$output_port_conflict" | grep "EXEC_CMD:" || true)
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  assert_contains "Headless: shows auto-remap message" "$output_port_conflict" "Auto-remapped"
+  assert_contains "Headless: remapped port in docker args" "$port_conflict_exec_cmd" "4000:3000"
+  assert_not_contains "Headless: original conflicting port removed" "$port_conflict_exec_cmd" " 3000:3000"
+  assert_contains "Headless: non-conflicting port unchanged" "$port_conflict_exec_cmd" "5173:5173"
+else
+  pass "Skipped headless port conflict test (Linux uses --network=host)"
+fi
 
 ########################################
 # Summary
