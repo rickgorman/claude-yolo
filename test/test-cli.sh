@@ -2661,10 +2661,18 @@ touch "$SETUP_TOKEN_DIR/Gemfile"
 SETUP_TOKEN_HOME="$TMPDIR_BASE/setup-token-home"
 mkdir -p "$SETUP_TOKEN_HOME/.claude"
 
-SETUP_TOKEN_DOCKER_LOG="$TMPDIR_BASE/docker-setup-token.log"
+# Mock claude that simulates setup-token by creating credentials
+cat > "$MOCK_BIN/claude" << MOCKEOF
+#!/usr/bin/env bash
+if [[ "\$1" == "setup-token" ]]; then
+  echo '{"claudeAiOauth":{"accessToken":"test-token"}}' > "\$HOME/.claude/.credentials.json"
+  exit 0
+fi
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/claude"
 
-# Mock docker that records run commands and simulates claude setup-token
-# creating a credentials file in the mounted temp dir
+# Standard docker mock for the CLI wrapper
 cat > "$MOCK_BIN/docker" << MOCKEOF
 #!/usr/bin/env bash
 case "\$1" in
@@ -2673,18 +2681,7 @@ case "\$1" in
   image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
   inspect) echo "2099-01-01T00:00:00.000Z" ;;
   rm) exit 0 ;;
-  run)
-    echo "\$*" > "$SETUP_TOKEN_DOCKER_LOG"
-    # Find the -v mount for /home/claude/.claude and create credentials there
-    for arg in "\$@"; do
-      if [[ "\$arg" == *":/home/claude/.claude" ]]; then
-        local_dir="\${arg%%:*}"
-        mkdir -p "\$local_dir"
-        echo '{"claudeAiOauth":{"accessToken":"test-token"}}' > "\$local_dir/.credentials.json"
-      fi
-    done
-    exit 0
-    ;;
+  run) exit 0 ;;
   *) exit 1 ;;
 esac
 MOCKEOF
@@ -2695,13 +2692,9 @@ output_setup_token=$(cd "$SETUP_TOKEN_DIR" && \
   PATH="$MOCK_BIN:$PATH" \
   bash "$CLI" --yolo --strategy generic --setup-token 2>&1 || true)
 
-setup_token_docker_args=$(cat "$SETUP_TOKEN_DOCKER_LOG" 2>/dev/null || echo "")
+assert_contains "--setup-token runs on host" "$output_setup_token" "claude setup-token"
 
-assert_contains "--setup-token runs claude setup-token in container" "$setup_token_docker_args" "claude setup-token"
-assert_contains "--setup-token uses --rm flag" "$setup_token_docker_args" "--rm"
-assert_contains "--setup-token mounts temp dir for credentials" "$setup_token_docker_args" ":/home/claude/.claude"
-
-# Verify credentials were copied to host ~/.claude/
+# Verify credentials were saved to host ~/.claude/
 if [[ -f "$SETUP_TOKEN_HOME/.claude/.credentials.json" ]]; then
   pass "--setup-token saves credentials to ~/.claude/.credentials.json"
 else

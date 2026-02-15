@@ -910,56 +910,20 @@ build_project_image() {
 ########################################
 
 run_setup_token() {
-  local strategy="$1"
-  local verbose="$2"
-  local worktree_path
-  worktree_path=$(get_worktree_path)
-  local image_name="claude-yolo-${strategy}"
-
-  # Ensure strategy image exists
-  if ! image_exists "$image_name"; then
-    build_strategy_image "$strategy" "$verbose"
+  if ! command -v claude &>/dev/null; then
+    fail "Claude Code is not installed. Install it first: https://code.claude.com"
+    return 1
   fi
 
-  # Create temp directory for Claude credentials
-  local tmp_claude_dir
-  tmp_claude_dir=$(mktemp -d "${TMPDIR:-/tmp}/claude-yolo-setup-XXXXXX")
-  trap 'rm -rf "$tmp_claude_dir"' RETURN
-
-  info "Running ${BOLD}claude setup-token${RESET} in container"
+  info "Running ${BOLD}claude setup-token${RESET}"
   echo "" >&2
   dim "This will open a browser-based OAuth flow."
   dim "Follow the prompts to authenticate your Claude account."
   echo "" >&2
 
-  # Platform
-  local platform=""
-  if [[ -f "$STRATEGIES_DIR/$strategy/platform" ]]; then
-    platform=$(cat "$STRATEGIES_DIR/$strategy/platform" | tr -d '[:space:]')
-  fi
+  claude setup-token
 
-  local -a docker_args=(
-    docker run -it --rm
-    --network=host
-    -v "${tmp_claude_dir}:/home/claude/.claude"
-    -w /workspace
-  )
-
-  if [[ -n "$platform" ]]; then
-    docker_args+=(--platform "$platform")
-  fi
-
-  docker_args+=(
-    "${image_name}:latest"
-    claude setup-token
-  )
-
-  "${docker_args[@]}"
-
-  # Check if credentials were created and copy to host
-  if [[ -f "${tmp_claude_dir}/.credentials.json" ]]; then
-    mkdir -p "${HOME}/.claude"
-    cp "${tmp_claude_dir}/.credentials.json" "${HOME}/.claude/.credentials.json"
+  if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
     success "Credentials saved to ~/.claude/.credentials.json"
   else
     fail "No credentials file was created"
@@ -1509,7 +1473,7 @@ main() {
 
   # --setup-token: run interactive OAuth setup and exit
   if [[ "$setup_token_mode" == true ]]; then
-    run_setup_token "$strategy" "$verbose"
+    run_setup_token
     footer
     exit 0
   fi
