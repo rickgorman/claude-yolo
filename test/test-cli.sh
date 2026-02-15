@@ -301,6 +301,21 @@ section "Argument parsing"
 output=$(bash "$CLI" --yolo --strategy 2>&1 || true)
 assert_contains "--strategy without arg shows error" "$output" "--strategy requires an argument"
 
+section "--help flag"
+
+help_output=$(bash "$CLI" --help 2>&1 || true)
+assert_contains "--help shows usage line" "$help_output" "Usage:"
+assert_contains "--help shows --yolo flag" "$help_output" "--yolo"
+assert_contains "--help shows --strategy flag" "$help_output" "--strategy"
+assert_contains "--help shows --env flag" "$help_output" "--env KEY=VALUE"
+assert_contains "--help shows --print flag" "$help_output" "--print"
+assert_contains "--help shows --trust-github-token" "$help_output" "--trust-github-token"
+assert_contains "--help shows --chrome flag" "$help_output" "--chrome"
+assert_contains "--help shows claude·yolo branding" "$help_output" "claude"
+
+h_output=$(bash "$CLI" -h 2>&1 || true)
+assert_contains "-h shows same help as --help" "$h_output" "Usage:"
+
 ########################################
 # Tests: Strategy detection — Rails
 ########################################
