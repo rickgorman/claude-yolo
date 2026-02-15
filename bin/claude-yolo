@@ -1054,7 +1054,7 @@ run_with_strategy() {
 
   # Mount ~/.claude.json to skip onboarding in container
   if [[ -f "${HOME}/.claude.json" ]]; then
-    docker_args+=(-v "${HOME}/.claude.json:/home/claude/.claude.json:ro")
+    docker_args+=(-v "${HOME}/.claude.json:/home/claude/.claude.json")
   fi
 
   # GitHub token for gh CLI inside container

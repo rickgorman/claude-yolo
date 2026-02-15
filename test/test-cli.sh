@@ -2792,6 +2792,56 @@ assert_not_contains "No CLAUDE_CODE_OAUTH_TOKEN without credentials" "$no_creds_
 assert_contains "Shows warning when no credentials" "$output_no_creds" "No Claude credentials found"
 
 ########################################
+# Tests: ~/.claude.json mount for onboarding skip
+########################################
+
+section "\$HOME/.claude.json mounted into container"
+
+CLAUDEJSON_DIR="$TMPDIR_BASE/claudejson-project"
+mkdir -p "$CLAUDEJSON_DIR"
+touch "$CLAUDEJSON_DIR/Gemfile"
+
+CLAUDEJSON_HOME="$TMPDIR_BASE/claudejson-home"
+mkdir -p "$CLAUDEJSON_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"cj-token"}}' > "$CLAUDEJSON_HOME/.claude/.credentials.json"
+echo '{"hasCompletedOnboarding":true}' > "$CLAUDEJSON_HOME/.claude.json"
+
+CLAUDEJSON_DOCKER_LOG="$TMPDIR_BASE/docker-claudejson.log"
+
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$CLAUDEJSON_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+cd "$CLAUDEJSON_DIR" && \
+  HOME="$CLAUDEJSON_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic >/dev/null 2>&1 || true
+
+claudejson_docker_args=$(cat "$CLAUDEJSON_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_contains "Mounts ~/.claude.json into container" "$claudejson_docker_args" ".claude.json:/home/claude/.claude.json"
+
+########################################
+# Tests: no ~/.claude.json mount when file missing
+########################################
+
+section "No ~/.claude.json mount when file missing"
+
+# Reuse NO_CREDS_HOME which has no .claude.json
+assert_not_contains "No .claude.json mount without file" "$no_creds_docker_args" ".claude.json:/home/claude/.claude.json"
+
+########################################
 # Summary
 ########################################
 
