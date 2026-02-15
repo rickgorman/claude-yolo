@@ -1621,8 +1621,7 @@ start_stopped_container() {
 ########################################
 
 show_help() {
-  cat <<EOF >&2
-
+  echo -e "
   ${BOLD}claude·yolo${RESET} — Run Claude Code in an isolated Docker container
 
   ${BOLD}Usage:${RESET}
@@ -1634,6 +1633,7 @@ show_help() {
     --strategy <name>        Skip auto-detection, use a specific strategy
                              ${DIM}(rails, python, node, go, android, rust, generic)${RESET}
     --build                  Force rebuild the Docker image before running
+    --reset                  Remove existing container and recreate from image
     --verbose                Show Docker build output instead of a spinner
 
   ${BOLD}Environment:${RESET}
@@ -1643,18 +1643,21 @@ show_help() {
   ${BOLD}Security:${RESET}
     --trust-github-token     Proceed even if the GitHub token has broad scopes
                              ${DIM}(delete_repo, admin:org, etc.)${RESET}
+    --trust-yolo             Skip .yolo/ directory trust prompt
 
   ${BOLD}Modes:${RESET}
     -p, --print              Headless mode — drop TTY, pass -p to Claude
     --chrome                 Enable Chrome DevTools MCP server for browser control
+
+  ${BOLD}Setup:${RESET}
+    --setup-token            Run Claude OAuth setup and save credentials
 
   ${BOLD}Info:${RESET}
     -h, --help               Show this help and exit
     CLAUDE_YOLO_NO_GITHUB=1  Skip GitHub token detection entirely
 
   ${DIM}Without --yolo, all arguments are forwarded to the native claude command.${RESET}
-
-EOF
+" >&2
   exit 0
 }
 
