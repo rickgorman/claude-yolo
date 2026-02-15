@@ -1291,7 +1291,13 @@ section "--chrome docker run args structure"
 
 # Verify the exec'd command is a proper docker run with expected flags
 assert_contains "Exec'd command starts with docker" "$exec_cmd_line" "docker run"
-assert_contains "Docker run includes --network=host" "$exec_cmd_line" "--network=host"
+# On macOS, --network=host is replaced by -p port flags
+if [[ "$(uname)" == "Darwin" ]]; then
+  assert_contains "Docker run includes port publish flags (macOS)" "$exec_cmd_line" "-p"
+  assert_not_contains "Docker run omits --network=host (macOS)" "$exec_cmd_line" "--network=host"
+else
+  assert_contains "Docker run includes --network=host" "$exec_cmd_line" "--network=host"
+fi
 assert_contains "Docker run includes --dangerously-skip-permissions" "$exec_cmd_line" "--dangerously-skip-permissions"
 assert_contains "Docker run uses rails image" "$exec_cmd_line" "claude-yolo-rails"
 
