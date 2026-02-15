@@ -196,6 +196,177 @@ image_age_days() {
 }
 
 ########################################
+# Port conflict resolution
+########################################
+
+# Global for passing resolved port flags back from resolve_port_conflicts
+_RESOLVED_PORT_FLAGS=()
+
+check_port_in_use() {
+  local port="$1"
+  lsof -i ":${port}" -sTCP:LISTEN &>/dev/null
+}
+
+find_free_port() {
+  local base_port="$1"
+  local candidate
+
+  # Prefer base+1000 (e.g. 3000 → 4000)
+  candidate=$((base_port + 1000))
+  if ! check_port_in_use "$candidate"; then
+    echo "$candidate"
+    return 0
+  fi
+
+  # Fall back to base+1, base+2, ...
+  local offset
+  for offset in $(seq 1 100); do
+    candidate=$((base_port + offset))
+    if ! check_port_in_use "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+resolve_port_conflicts() {
+  local auto_remap="$1"
+  shift
+  local -a input_flags=("$@")
+
+  # Parse host ports and detect conflicts
+  local -a conflict_ports=()
+  local -a conflict_suggestions=()
+  local all_remappable=true
+
+  local i=0
+  while [[ $i -lt ${#input_flags[@]} ]]; do
+    if [[ "${input_flags[$i]}" == "-p" ]]; then
+      local mapping="${input_flags[$((i + 1))]}"
+      local host_port="${mapping%%:*}"
+
+      if check_port_in_use "$host_port"; then
+        conflict_ports+=("$host_port")
+        local suggested
+        suggested=$(find_free_port "$host_port") || { all_remappable=false; suggested=""; }
+        conflict_suggestions+=("$suggested")
+      fi
+      i=$((i + 2))
+    else
+      i=$((i + 1))
+    fi
+  done
+
+  # No conflicts — pass through unchanged
+  if [[ ${#conflict_ports[@]} -eq 0 ]]; then
+    _RESOLVED_PORT_FLAGS=("${input_flags[@]}")
+    return 0
+  fi
+
+  # Display conflicts
+  echo "" >&2
+  warn "Port conflict detected"
+  local idx
+  for idx in "${!conflict_ports[@]}"; do
+    local cp="${conflict_ports[$idx]}"
+    local proc_pid
+    proc_pid=$(lsof -i ":${cp}" -sTCP:LISTEN -t 2>/dev/null | head -1)
+    local proc_name=""
+    if [[ -n "$proc_pid" ]]; then
+      proc_name=$(ps -p "$proc_pid" -o comm= 2>/dev/null || true)
+    fi
+    if [[ -n "$proc_name" ]]; then
+      dim "  Port ${cp} in use by ${proc_name} (pid ${proc_pid})"
+    else
+      dim "  Port ${cp} is already in use"
+    fi
+  done
+  echo "" >&2
+
+  local do_remap=false
+
+  if [[ "$auto_remap" == true ]]; then
+    # Headless mode: auto-remap without prompting
+    if [[ "$all_remappable" == true ]]; then
+      do_remap=true
+      for idx in "${!conflict_ports[@]}"; do
+        info "Auto-remapped ${conflict_ports[$idx]} → ${conflict_suggestions[$idx]}"
+      done
+    else
+      fail "Cannot auto-remap all conflicting ports"
+      _RESOLVED_PORT_FLAGS=("${input_flags[@]}")
+      return 1
+    fi
+  else
+    # Interactive prompt
+    if [[ "$all_remappable" == true ]]; then
+      dim "  Suggested remapping:"
+      for idx in "${!conflict_ports[@]}"; do
+        dim "    ${conflict_ports[$idx]} → ${conflict_suggestions[$idx]}"
+      done
+      echo "" >&2
+      echo -e "    ${BOLD}1${RESET}  Remap to suggested ports" >&2
+      echo -e "    ${BOLD}2${RESET}  Continue anyway (docker may fail)" >&2
+      echo "" >&2
+
+      local choice
+      read -p "  Press ENTER to remap, or select [1-2]: " choice >&2
+
+      case "$choice" in
+        ""|1)
+          do_remap=true
+          for idx in "${!conflict_ports[@]}"; do
+            success "Remapped ${conflict_ports[$idx]} → ${conflict_suggestions[$idx]}"
+          done
+          ;;
+        *)
+          warn "Continuing with conflicting ports"
+          ;;
+      esac
+    else
+      warn "Could not find free alternatives for all ports"
+      dim "  Docker may fail to start with these port conflicts."
+    fi
+  fi
+
+  # Apply remapping or pass through
+  if [[ "$do_remap" == true ]]; then
+    local -a new_flags=()
+    i=0
+    while [[ $i -lt ${#input_flags[@]} ]]; do
+      if [[ "${input_flags[$i]}" == "-p" ]]; then
+        local mapping="${input_flags[$((i + 1))]}"
+        local host_port="${mapping%%:*}"
+        local container_port="${mapping#*:}"
+        local remapped=false
+
+        local cidx
+        for cidx in "${!conflict_ports[@]}"; do
+          if [[ "$host_port" == "${conflict_ports[$cidx]}" ]]; then
+            new_flags+=(-p "${conflict_suggestions[$cidx]}:${container_port}")
+            remapped=true
+            break
+          fi
+        done
+
+        if [[ "$remapped" == false ]]; then
+          new_flags+=(-p "$mapping")
+        fi
+        i=$((i + 2))
+      else
+        new_flags+=("${input_flags[$i]}")
+        i=$((i + 1))
+      fi
+    done
+    _RESOLVED_PORT_FLAGS=("${new_flags[@]}")
+  else
+    _RESOLVED_PORT_FLAGS=("${input_flags[@]}")
+  fi
+}
+
+########################################
 # Chrome CDP (used by multiple strategies)
 ########################################
 
@@ -497,7 +668,7 @@ detect_ruby_version() {
 
   if [[ -f "${worktree_path}/.tool-versions" ]]; then
     local ver
-    ver=$(grep "^ruby " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $2}' | head -1)
+    ver=$(grep -E "^(local )?ruby " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $NF}' | head -1)
     if [[ -n "$ver" ]]; then
       echo "$ver"
       return 0
@@ -1072,6 +1243,12 @@ run_with_strategy() {
         fi
       done < "${worktree_path}/.yolo/ports"
     fi
+  fi
+
+  # Resolve port conflicts on macOS before launching
+  if [[ ${#port_flags[@]} -gt 0 ]]; then
+    resolve_port_conflicts "$headless_mode" "${port_flags[@]}"
+    port_flags=("${_RESOLVED_PORT_FLAGS[@]}")
   fi
 
   # --network=host and -p are mutually exclusive; on macOS we need -p

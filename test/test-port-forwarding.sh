@@ -44,11 +44,17 @@ section() {
   echo "━━━ $1 ━━━"
 }
 
+_HOST_PIDS=()
+
 cleanup() {
   echo ""
   echo "Cleaning up..."
   for c in "${_CONTAINERS[@]}"; do
     docker rm -f "$c" 2>/dev/null || true
+  done
+  for pid in "${_HOST_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
   done
 }
 trap cleanup EXIT
@@ -230,6 +236,94 @@ if echo "$port_output" | grep -q "${PORT_D}"; then
   fail "docker port should NOT show unpublished ${PORT_D}"
 else
   pass "docker port correctly omits unpublished ${PORT_D}"
+fi
+
+########################################
+# Test 5: Port conflict — remapped port reaches container
+########################################
+
+section "Port conflict: remapped port reaches container"
+
+# Use a port not used by earlier tests (19301-19304 are taken)
+PORT_CONFLICT=19305
+node -e "
+  require('http').createServer((_, res) => {
+    res.writeHead(200);
+    res.end('HOST_OCCUPIED');
+  }).listen(${PORT_CONFLICT}, '0.0.0.0');
+" &
+_HOST_PIDS+=($!)
+sleep 1
+
+# Verify the port is actually occupied on the host
+host_response=$(curl -sf "http://localhost:${PORT_CONFLICT}" 2>/dev/null || echo "")
+if [[ "$host_response" == "HOST_OCCUPIED" ]]; then
+  pass "Port ${PORT_CONFLICT} occupied on host for conflict test"
+else
+  fail "Failed to occupy port ${PORT_CONFLICT} on host (got: '${host_response}')"
+fi
+
+# Start a container with the REMAPPED port mapped to the container's internal port
+# This simulates what resolve_port_conflicts would do: remap host port to +1000
+CONTAINER_5="${CONTAINER_PREFIX}-conflict"
+_CONTAINERS+=("$CONTAINER_5")
+REMAPPED_PORT=$((PORT_CONFLICT + 1000))
+
+docker run -d --name "$CONTAINER_5" \
+  -p "${REMAPPED_PORT}:${PORT_CONFLICT}" \
+  "${IMAGE}:latest" \
+  tail -f /dev/null \
+  >/dev/null 2>&1
+
+# Start HTTP server inside container on the CONTAINER port (original)
+start_http_server "$CONTAINER_5" "$PORT_CONFLICT"
+
+# Verify the remapped host port reaches the container
+if wait_for_port "$REMAPPED_PORT"; then
+  response=$(curl -sf "http://localhost:${REMAPPED_PORT}" 2>/dev/null || echo "")
+  if [[ "$response" == "OK:${PORT_CONFLICT}" ]]; then
+    pass "Remapped port ${REMAPPED_PORT} reaches container port ${PORT_CONFLICT}"
+  else
+    fail "Remapped port response incorrect (got: '${response}')"
+  fi
+else
+  fail "Remapped port ${REMAPPED_PORT} not reachable from host"
+fi
+
+# Verify original port still returns host response (not container)
+original_response=$(curl -sf "http://localhost:${PORT_CONFLICT}" 2>/dev/null || echo "")
+if [[ "$original_response" == "HOST_OCCUPIED" ]]; then
+  pass "Original port ${PORT_CONFLICT} still serves host process"
+else
+  fail "Original port ${PORT_CONFLICT} response changed (got: '${original_response}')"
+fi
+
+########################################
+# Test 6: Conflict detection via lsof
+########################################
+
+section "Conflict detection identifies occupied port"
+
+# PORT_CONFLICT (19301) is still occupied by the host listener from Test 5
+if lsof -i ":${PORT_CONFLICT}" -sTCP:LISTEN &>/dev/null; then
+  pass "lsof detects occupied port ${PORT_CONFLICT}"
+else
+  fail "lsof did not detect occupied port ${PORT_CONFLICT}"
+fi
+
+# REMAPPED_PORT (20301) is occupied by docker
+if lsof -i ":${REMAPPED_PORT}" -sTCP:LISTEN &>/dev/null; then
+  pass "lsof detects docker-occupied port ${REMAPPED_PORT}"
+else
+  fail "lsof did not detect docker-occupied port ${REMAPPED_PORT}"
+fi
+
+# A truly free port should not be detected
+FREE_PORT=19399
+if lsof -i ":${FREE_PORT}" -sTCP:LISTEN &>/dev/null; then
+  fail "lsof falsely detected free port ${FREE_PORT}"
+else
+  pass "lsof correctly reports port ${FREE_PORT} as free"
 fi
 
 ########################################
