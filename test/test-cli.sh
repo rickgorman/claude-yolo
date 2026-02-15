@@ -833,7 +833,7 @@ output=$(bash -c '
   bash "'"$CLI"'" --yolo 2>&1
 ' 2>&1 || true)
 
-assert_contains "Shows error when docker missing" "$output" "Docker is not installed"
+assert_contains "Shows error when docker missing" "$output" "Missing required dependencies"
 assert_contains "Error uses styled glyph" "$output" "✘"
 
 section "CLI integration — docker not running"
@@ -1640,27 +1640,14 @@ GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$GH_CONFIG_HOME" find_githu
 assert_eq "find_github_token reads gh CLI config" "gho_from_gh_config" "$_GITHUB_TOKEN"
 assert_contains "find_github_token reports gh config source" "$_GITHUB_TOKEN_SOURCE" "hosts.yml"
 
-section "find_github_token — gh auth token (keyring)"
+section "find_github_token — not found"
 
 EMPTY_HOME="$TMPDIR_BASE/empty-home-for-token"
 mkdir -p "$EMPTY_HOME"
-# Mock gh to simulate keyring-based token retrieval
-gh() { echo "gho_from_keyring"; return 0; }
-_GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
-GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$EMPTY_HOME" find_github_token "$EMPTY_DIR" || true
-assert_eq "find_github_token reads gh auth token" "gho_from_keyring" "$_GITHUB_TOKEN"
-assert_contains "find_github_token reports keyring source" "$_GITHUB_TOKEN_SOURCE" "keyring"
-unset -f gh
-
-section "find_github_token — not found"
-
-# Mock gh to return nothing (simulates no keyring token)
-gh() { return 1; }
 _GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
 GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$EMPTY_HOME" find_github_token "$EMPTY_DIR" && status=0 || status=1
 assert_eq "find_github_token returns failure when nothing found" "1" "$status"
 assert_eq "find_github_token leaves _GITHUB_TOKEN empty" "" "$_GITHUB_TOKEN"
-unset -f gh
 
 ########################################
 # Tests: validate_github_token
@@ -2676,11 +2663,17 @@ touch "$SETUP_TOKEN_DIR/Gemfile"
 SETUP_TOKEN_HOME="$TMPDIR_BASE/setup-token-home"
 mkdir -p "$SETUP_TOKEN_HOME/.claude"
 
-# Mock claude that simulates setup-token by creating credentials
+# Mock claude that simulates setup-token by printing the token to stdout
 cat > "$MOCK_BIN/claude" << MOCKEOF
 #!/usr/bin/env bash
 if [[ "\$1" == "setup-token" ]]; then
-  echo '{"claudeAiOauth":{"accessToken":"test-token"}}' > "\$HOME/.claude/.credentials.json"
+  echo "Long-lived authentication token created successfully!"
+  echo ""
+  echo "Your OAuth token (valid for 1 year):"
+  echo ""
+  echo "sk-ant-oat01-test-setup-token-value"
+  echo ""
+  echo "Store this token securely."
   exit 0
 fi
 exit 1
@@ -2702,9 +2695,68 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/docker"
 
+# Tmux mock: runs command synchronously, captures output to logfile via pipe-pane
+cat > "$MOCK_BIN/tmux" << 'MOCKEOF'
+#!/usr/bin/env bash
+# Extract session name from -t or -s flags
+session=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == "-t" || "${args[$i]}" == "-s" ]]; then
+    session="${args[$((i+1))]}"
+    break
+  fi
+done
+MOCK_STATE="/tmp/tmux-mock-${session:-default}"
+mkdir -p "$MOCK_STATE"
+
+case "$1" in
+  kill-session) rm -rf "$MOCK_STATE"; mkdir -p "$MOCK_STATE" ;;
+  new-session)
+    shift
+    cmd=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -d) shift ;;
+        -s|-x|-y) shift 2 ;;
+        *) cmd="$1"; shift ;;
+      esac
+    done
+    bash -c "$cmd" > "$MOCK_STATE/output" 2>&1 || true
+    ;;
+  pipe-pane)
+    shift
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -o)
+          logfile=$(echo "$2" | sed "s/cat >> '//; s/'$//")
+          if [[ -f "$MOCK_STATE/output" && -n "$logfile" ]]; then
+            cat "$MOCK_STATE/output" >> "$logfile"
+          fi
+          shift 2
+          ;;
+        *) shift ;;
+      esac
+    done
+    ;;
+  attach-session) ;;
+  has-session) exit 1 ;;
+esac
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/tmux"
+
+# No-op sleep mock to avoid 2s delay from "sleep 2" in setup-token command
+cat > "$MOCK_BIN/sleep" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/sleep"
+
 output_setup_token=$(cd "$SETUP_TOKEN_DIR" && \
   HOME="$SETUP_TOKEN_HOME" \
   PATH="$MOCK_BIN:$PATH" \
+  CLAUDE_YOLO_NO_GITHUB=1 \
   bash "$CLI" --yolo --strategy generic --setup-token 2>&1 || true)
 
 assert_contains "--setup-token runs on host" "$output_setup_token" "claude setup-token"
@@ -2717,6 +2769,13 @@ else
 fi
 
 assert_contains "--setup-token shows success message" "$output_setup_token" "Credentials saved"
+
+# Verify the captured token was written to credentials file
+setup_token_saved=$(grep -o 'sk-ant-[a-zA-Z0-9_-]*' "$SETUP_TOKEN_HOME/.claude/.credentials.json" 2>/dev/null | head -1)
+assert_eq "--setup-token captures and saves token from stdout" "sk-ant-oat01-test-setup-token-value" "$setup_token_saved"
+
+# Verify --setup-token continues to launch (doesn't exit after setup)
+assert_contains "--setup-token continues to launch session" "$output_setup_token" "Launching Claude Code"
 
 ########################################
 # Tests: CLAUDE_CODE_OAUTH_TOKEN env var

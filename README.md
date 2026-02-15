@@ -70,6 +70,8 @@ cc --yolo --verbose
 | `--env-file <path>` | Inject env vars from a dotenv-style file (repeatable) |
 | `-p`, `--print` | Headless mode — drop TTY, pass `-p` to Claude |
 | `--trust-github-token` | Proceed even if the GitHub token has broad scopes |
+| `--setup-token` | Run Claude OAuth setup, save credentials, and launch |
+| `--reset` | Remove existing container and recreate from image |
 | `-h`, `--help` | Show help and exit |
 
 ## GitHub Token
@@ -81,7 +83,6 @@ In `--yolo` mode, claude-yolo requires a valid GitHub token so that `gh` works i
 3. `.env` file in the project directory
 4. `~/.env`
 5. `~/.config/gh/hosts.yml` (written by `gh auth login`)
-6. `gh auth token` (macOS Keychain / system keyring)
 
 The token is validated against `api.github.com/user` before launching the container.
 
@@ -223,10 +224,18 @@ Each strategy lives in `strategies/<name>/` with:
 
 ## Requirements
 
-- Docker
-- Chrome (only needed with `--chrome` flag)
-- PostgreSQL on localhost:5432 (for Rails)
-- Android device with wireless debugging (for Android)
+| Dependency | Required | Notes |
+|------------|----------|-------|
+| Docker | Always | Docker Desktop (Mac/Windows) or Docker Engine (Linux) |
+| git | Always | Detects worktree root for project mounting |
+| curl | Always | Validates GitHub tokens against the GitHub API |
+| tmux | Always | Captures `claude setup-token` output; used for session management |
+| Claude Code | Always | `npm install -g @anthropic-ai/claude-code` — [docs](https://docs.anthropic.com/en/docs/claude-code) |
+| Chrome | `--chrome` only | Browser automation via Chrome DevTools Protocol |
+| PostgreSQL | Rails only | Expected on localhost:5432 |
+| Android device | Android only | Physical device with wireless debugging enabled |
+
+The script checks for missing dependencies on startup and tells you how to install them.
 
 ## License
 
