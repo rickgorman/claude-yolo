@@ -1026,12 +1026,13 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/curl"
 
-# Set up fake HOME with commands directory and settings files
+# Set up fake HOME with commands directory, settings files, and credentials
 FAKE_HOME="$TMPDIR_BASE/fake-claude-home"
 mkdir -p "$FAKE_HOME/.claude/commands"
 echo "test" > "$FAKE_HOME/.claude/commands/test.md"
 echo '{}' > "$FAKE_HOME/.claude/settings.json"
 echo '{}' > "$FAKE_HOME/.claude/settings.local.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$FAKE_HOME/.claude/.credentials.json"
 
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
@@ -2327,6 +2328,7 @@ EOF
 YOLO_ENV_DOCKER_LOG="$TMPDIR_BASE/docker-yolo-env.log"
 YOLO_ENV_TRUST_DIR="$TMPDIR_BASE/yolo-env-trust-home"
 mkdir -p "$YOLO_ENV_TRUST_DIR/.claude"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$YOLO_ENV_TRUST_DIR/.claude/.credentials.json"
 
 cat > "$MOCK_BIN/docker" << MOCKEOF
 #!/usr/bin/env bash
@@ -2535,6 +2537,7 @@ output_trust_yolo=$(bash -c '
   cd "'"$YOLO_ENV_DIR"'"
   HOME="'"$TMPDIR_BASE/trust-yolo-test-home"'"
   mkdir -p "$HOME/.claude"
+  echo '"'"'{"claudeAiOauth":{"accessToken":"fake-test-token"}}'"'"' > "$HOME/.claude/.credentials.json"
   bash "'"$CLI"'" --yolo --strategy generic --trust-yolo 2>&1
 ' 2>&1 || true)
 
@@ -2599,6 +2602,7 @@ EOF
 YOLO_DOCKERFILE_DOCKER_LOG="$TMPDIR_BASE/docker-yolo-dockerfile.log"
 YOLO_DOCKERFILE_HOME="$TMPDIR_BASE/yolo-dockerfile-home"
 mkdir -p "$YOLO_DOCKERFILE_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$YOLO_DOCKERFILE_HOME/.claude/.credentials.json"
 
 _dockerfile_build_called=false
 cat > "$MOCK_BIN/docker" << MOCKEOF
@@ -2643,6 +2647,192 @@ output=$(cd "$YOLO_DOCKERFILE_DIR" && \
 yolo_dockerfile_log=$(cat "$YOLO_DOCKERFILE_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains ".yolo/Dockerfile triggers project image build" "$output" "Building project image"
 assert_contains ".yolo/Dockerfile build uses -f flag" "$yolo_dockerfile_log" ".yolo/Dockerfile"
+
+########################################
+# Tests: --setup-token flag parsing
+########################################
+
+section "--setup-token flag parsing"
+
+SETUP_TOKEN_DIR="$TMPDIR_BASE/setup-token-project"
+mkdir -p "$SETUP_TOKEN_DIR"
+touch "$SETUP_TOKEN_DIR/Gemfile"
+
+SETUP_TOKEN_HOME="$TMPDIR_BASE/setup-token-home"
+mkdir -p "$SETUP_TOKEN_HOME/.claude"
+
+# Mock claude that simulates setup-token by creating credentials
+cat > "$MOCK_BIN/claude" << MOCKEOF
+#!/usr/bin/env bash
+if [[ "\$1" == "setup-token" ]]; then
+  echo '{"claudeAiOauth":{"accessToken":"test-token"}}' > "\$HOME/.claude/.credentials.json"
+  exit 0
+fi
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/claude"
+
+# Standard docker mock for the CLI wrapper
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output_setup_token=$(cd "$SETUP_TOKEN_DIR" && \
+  HOME="$SETUP_TOKEN_HOME" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic --setup-token 2>&1 || true)
+
+assert_contains "--setup-token runs on host" "$output_setup_token" "claude setup-token"
+
+# Verify credentials were saved to host ~/.claude/
+if [[ -f "$SETUP_TOKEN_HOME/.claude/.credentials.json" ]]; then
+  pass "--setup-token saves credentials to ~/.claude/.credentials.json"
+else
+  fail "--setup-token saves credentials to ~/.claude/.credentials.json"
+fi
+
+assert_contains "--setup-token shows success message" "$output_setup_token" "Credentials saved"
+
+########################################
+# Tests: CLAUDE_CODE_OAUTH_TOKEN env var
+########################################
+
+section "CLAUDE_CODE_OAUTH_TOKEN injected from host credentials"
+
+OAUTH_TOKEN_DIR="$TMPDIR_BASE/oauth-token-project"
+mkdir -p "$OAUTH_TOKEN_DIR"
+touch "$OAUTH_TOKEN_DIR/Gemfile"
+
+OAUTH_TOKEN_HOME="$TMPDIR_BASE/oauth-token-home"
+mkdir -p "$OAUTH_TOKEN_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"my-oauth-test-token"}}' > "$OAUTH_TOKEN_HOME/.claude/.credentials.json"
+
+OAUTH_TOKEN_DOCKER_LOG="$TMPDIR_BASE/docker-oauth-token.log"
+
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$OAUTH_TOKEN_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output_oauth=$(cd "$OAUTH_TOKEN_DIR" && \
+  HOME="$OAUTH_TOKEN_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic 2>&1 || true)
+
+oauth_docker_args=$(cat "$OAUTH_TOKEN_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_contains "Docker args include CLAUDE_CODE_OAUTH_TOKEN" "$oauth_docker_args" "CLAUDE_CODE_OAUTH_TOKEN=my-oauth-test-token"
+assert_contains "Output shows token injected message" "$output_oauth" "Claude OAuth token injected"
+
+########################################
+# Tests: no OAuth token without credentials
+########################################
+
+section "No OAuth token without host credentials"
+
+NO_CREDS_DIR="$TMPDIR_BASE/no-creds-project"
+mkdir -p "$NO_CREDS_DIR"
+touch "$NO_CREDS_DIR/Gemfile"
+
+NO_CREDS_HOME="$TMPDIR_BASE/no-creds-home"
+mkdir -p "$NO_CREDS_HOME/.claude"
+
+NO_CREDS_DOCKER_LOG="$TMPDIR_BASE/docker-no-creds.log"
+
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$NO_CREDS_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+output_no_creds=$(cd "$NO_CREDS_DIR" && \
+  HOME="$NO_CREDS_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic 2>&1 || true)
+
+no_creds_docker_args=$(cat "$NO_CREDS_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_not_contains "No CLAUDE_CODE_OAUTH_TOKEN without credentials" "$no_creds_docker_args" "CLAUDE_CODE_OAUTH_TOKEN"
+assert_contains "Shows warning when no credentials" "$output_no_creds" "No Claude credentials found"
+
+########################################
+# Tests: ~/.claude.json mount for onboarding skip
+########################################
+
+section "\$HOME/.claude.json mounted into container"
+
+CLAUDEJSON_DIR="$TMPDIR_BASE/claudejson-project"
+mkdir -p "$CLAUDEJSON_DIR"
+touch "$CLAUDEJSON_DIR/Gemfile"
+
+CLAUDEJSON_HOME="$TMPDIR_BASE/claudejson-home"
+mkdir -p "$CLAUDEJSON_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"cj-token"}}' > "$CLAUDEJSON_HOME/.claude/.credentials.json"
+echo '{"hasCompletedOnboarding":true}' > "$CLAUDEJSON_HOME/.claude.json"
+
+CLAUDEJSON_DOCKER_LOG="$TMPDIR_BASE/docker-claudejson.log"
+
+cat > "$MOCK_BIN/docker" << MOCKEOF
+#!/usr/bin/env bash
+case "\$1" in
+  info) exit 0 ;;
+  ps) echo "" ;;
+  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
+  inspect) echo "2099-01-01T00:00:00.000Z" ;;
+  rm) exit 0 ;;
+  run) echo "\$*" > "$CLAUDEJSON_DOCKER_LOG"; exit 0 ;;
+  *) exit 1 ;;
+esac
+MOCKEOF
+chmod +x "$MOCK_BIN/docker"
+
+cd "$CLAUDEJSON_DIR" && \
+  HOME="$CLAUDEJSON_HOME" \
+  GH_TOKEN="test_token_for_ci" \
+  PATH="$MOCK_BIN:$PATH" \
+  bash "$CLI" --yolo --strategy generic >/dev/null 2>&1 || true
+
+claudejson_docker_args=$(cat "$CLAUDEJSON_DOCKER_LOG" 2>/dev/null || echo "")
+
+assert_contains "Mounts ~/.claude.json into container" "$claudejson_docker_args" ".claude.json:/home/claude/.claude.json"
+
+########################################
+# Tests: no ~/.claude.json mount when file missing
+########################################
+
+section "No ~/.claude.json mount when file missing"
+
+# Reuse NO_CREDS_HOME which has no .claude.json
+assert_not_contains "No .claude.json mount without file" "$no_creds_docker_args" ".claude.json:/home/claude/.claude.json"
 
 ########################################
 # Summary

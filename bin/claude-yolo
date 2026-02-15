@@ -6,6 +6,7 @@
 #   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
 #              [--env KEY=VALUE]... [--env-file <path>]...
 #              [--trust-github-token] [--trust-yolo] [--reset]
+#              [--setup-token]
 #              [-p <prompt>] [claude args...]
 #
 # Flags:
@@ -19,6 +20,7 @@
 #   --trust-github-token  Skip broad-scope GitHub token warnings
 #   --trust-yolo        Skip .yolo/ directory trust prompt
 #   --reset             Remove existing container and recreate from image
+#   --setup-token       Run Claude OAuth setup and save credentials to .yolo/
 #   -p, --print         Run Claude in headless print mode (non-interactive)
 #
 # Without --yolo, passes through to the native claude command.
@@ -904,6 +906,33 @@ build_project_image() {
 }
 
 ########################################
+# Claude OAuth token setup
+########################################
+
+run_setup_token() {
+  if ! command -v claude &>/dev/null; then
+    fail "Claude Code is not installed. Install it first: https://code.claude.com"
+    return 1
+  fi
+
+  info "Running ${BOLD}claude setup-token${RESET}"
+  echo "" >&2
+  dim "This will open a browser-based OAuth flow."
+  dim "Follow the prompts to authenticate your Claude account."
+  echo "" >&2
+
+  claude setup-token
+
+  if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
+    success "Credentials saved to ~/.claude/.credentials.json"
+  else
+    fail "No credentials file was created"
+    dim "The setup-token process may not have completed successfully."
+    return 1
+  fi
+}
+
+########################################
 # Container execution
 ########################################
 
@@ -976,6 +1005,21 @@ run_with_strategy() {
     -e "LINES=$(tput lines 2>/dev/null || echo 40)"
     -w /workspace
   )
+
+  # Claude OAuth token for container authentication
+  local oauth_token=""
+  if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
+    oauth_token=$(grep -o '"accessToken":"[^"]*"' "${HOME}/.claude/.credentials.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  fi
+  if [[ -n "$oauth_token" ]]; then
+    docker_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${oauth_token}")
+    success "Claude OAuth token injected"
+  fi
+
+  # Mount ~/.claude.json to skip onboarding in container
+  if [[ -f "${HOME}/.claude.json" ]]; then
+    docker_args+=(-v "${HOME}/.claude.json:/home/claude/.claude.json")
+  fi
 
   # GitHub token for gh CLI inside container
   if [[ -n "$_GITHUB_TOKEN" ]]; then
@@ -1195,6 +1239,18 @@ MCPEOF
   info "Starting container ${DIM}${container_name}${RESET}"
   success "Launching Claude Code"
   footer
+
+  # When Chrome was started, spawn a background cleanup watcher.
+  # It waits for this process to exit, then stops the Chrome instance.
+  if [[ "$chrome_mode" == true ]]; then
+    (
+      # Wait for parent process (which will be replaced by exec) to exit
+      while kill -0 $$ 2>/dev/null; do sleep 1; done
+      CDP_PORT="$cdp_port" "$REPO_DIR/scripts/start-chrome.sh" --stop 2>/dev/null
+    ) &
+    disown
+  fi
+
   exec "${docker_args[@]}"
 }
 
@@ -1279,6 +1335,7 @@ main() {
   local trust_github_token=false
   local trust_yolo=false
   local reset_mode=false
+  local setup_token_mode=false
   local -a extra_env=()
   local -a env_files=()
   local claude_args=()
@@ -1327,6 +1384,10 @@ main() {
         ;;
       --reset)
         reset_mode=true
+        shift
+        ;;
+      --setup-token)
+        setup_token_mode=true
         shift
         ;;
       -p|--print)
@@ -1408,6 +1469,18 @@ main() {
       exit 0
     fi
     [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
+  fi
+
+  # --setup-token: run interactive OAuth setup and exit
+  if [[ "$setup_token_mode" == true ]]; then
+    run_setup_token
+    footer
+    exit 0
+  fi
+
+  # Check for Claude credentials on host
+  if [[ ! -f "${HOME}/.claude/.credentials.json" ]]; then
+    warn "No Claude credentials found. Run ${BOLD}claude setup-token${RESET} or ${BOLD}cc --yolo --setup-token${RESET} to authenticate."
   fi
 
   # Ensure GitHub token for gh CLI inside container
