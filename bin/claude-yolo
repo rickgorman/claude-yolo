@@ -1257,6 +1257,14 @@ run_with_strategy() {
     network_flags=()
   fi
 
+  # When not using --network=host, localhost inside the container won't reach the
+  # host. Use host.docker.internal so the MCP server can connect to Chrome on
+  # the host.
+  local cdp_host="localhost"
+  if [[ ${#network_flags[@]} -eq 0 ]]; then
+    cdp_host="host.docker.internal"
+  fi
+
   local -a docker_args=(
     docker run ${tty_flags[@]+"${tty_flags[@]}"}
     --name "$container_name"
@@ -1265,7 +1273,7 @@ run_with_strategy() {
     -v "${worktree_path}:/workspace"
     -v "${HOME}/.claude:/home/claude/.claude"
     -v "${node_volume}:/workspace/node_modules"
-    -e "CHROME_CDP_URL=http://localhost:${cdp_port}"
+    -e "CHROME_CDP_URL=http://${cdp_host}:${cdp_port}"
     -e "TERM=${TERM:-xterm-256color}"
     -e "COLORTERM=${COLORTERM:-}"
     -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)"
@@ -1283,9 +1291,15 @@ run_with_strategy() {
     success "Claude OAuth token injected"
   fi
 
-  # Mount ~/.claude.json to skip onboarding in container
+  # Seed container with a copy of ~/.claude.json to skip onboarding.
+  # Must be a copy, not a bind-mount of the original, because Claude Code
+  # writes back to this file (cache updates, bypass acceptance, etc.) and
+  # concurrent writes through Docker's file-sharing layer corrupt the JSON.
   if [[ -f "${HOME}/.claude.json" ]]; then
-    docker_args+=(-v "${HOME}/.claude.json:/home/claude/.claude.json")
+    local claude_json_copy
+    claude_json_copy=$(mktemp /tmp/claude-yolo-config-XXXXXX)
+    cp "${HOME}/.claude.json" "$claude_json_copy"
+    docker_args+=(-v "${claude_json_copy}:/home/claude/.claude.json")
   fi
 
   # GitHub token for gh CLI inside container
@@ -1489,20 +1503,38 @@ run_with_strategy() {
 
   # Chrome CDP MCP server
   if [[ "$chrome_mode" == true ]]; then
+    if ! command -v jq &>/dev/null; then
+      fail "jq is required for --chrome but was not found."
+      echo "" >&2
+      if [[ "$(uname)" == "Darwin" ]]; then
+        dim "Install with: brew install jq"
+      else
+        dim "Install with: sudo apt-get install -y jq"
+      fi
+      exit 1
+    fi
+
     ensure_chrome "$cdp_port"
 
     local mcp_config
     mcp_config=$(mktemp /tmp/claude-yolo-mcp-XXXXXX)
-    cat > "$mcp_config" <<MCPEOF
-{
-  "mcpServers": {
-    "chrome-devtools": {
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:${cdp_port}"]
-    }
-  }
-}
-MCPEOF
+
+    local chrome_devtools_entry
+    chrome_devtools_entry=$(cat <<CDPJSON
+{"command":"npx","args":["-y","chrome-devtools-mcp@latest","--browser-url=http://${cdp_host}:${cdp_port}"]}
+CDPJSON
+)
+
+    local existing_mcp="${HOME}/.mcp.json"
+    if [[ -f "$existing_mcp" ]] && jq empty "$existing_mcp" 2>/dev/null; then
+      jq --argjson entry "$chrome_devtools_entry" \
+        '.mcpServers["chrome-devtools"] = $entry' \
+        "$existing_mcp" > "$mcp_config"
+    else
+      jq -n --argjson entry "$chrome_devtools_entry" \
+        '{"mcpServers":{"chrome-devtools":$entry}}' > "$mcp_config"
+    fi
+
     docker_args+=(-v "${mcp_config}:/home/claude/.mcp.json:ro")
     info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
   fi
@@ -1786,6 +1818,17 @@ main() {
     # If we reach here, restart failed; fall through to create new container
   fi
 
+  # --setup-token: run interactive OAuth setup, then continue to launch
+  if [[ "$setup_token_mode" == true ]]; then
+    run_setup_token || { footer; exit 1; }
+  fi
+
+  # Check for Claude credentials on host (before environment selection)
+  if [[ ! -f "${HOME}/.claude/.credentials.json" ]]; then
+    warn "No Claude credentials found. Run ${BOLD}claude setup-token${RESET} or ${BOLD}cc --yolo --setup-token${RESET} to authenticate."
+    exit 1
+  fi
+
   # .yolo/strategy override (before auto-detection)
   if [[ -z "$force_strategy" && -f "${worktree_path}/.yolo/strategy" ]]; then
     local yolo_strategy
@@ -1812,16 +1855,6 @@ main() {
       exit 0
     fi
     [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
-  fi
-
-  # --setup-token: run interactive OAuth setup, then continue to launch
-  if [[ "$setup_token_mode" == true ]]; then
-    run_setup_token || { footer; exit 1; }
-  fi
-
-  # Check for Claude credentials on host
-  if [[ ! -f "${HOME}/.claude/.credentials.json" ]]; then
-    warn "No Claude credentials found. Run ${BOLD}claude setup-token${RESET} or ${BOLD}cc --yolo --setup-token${RESET} to authenticate."
   fi
 
   # Ensure GitHub token for gh CLI inside container
