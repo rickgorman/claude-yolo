@@ -65,7 +65,7 @@ cc --yolo --verbose
 | `--strategy <name>` | Skip auto-detection, use the specified strategy |
 | `--build` | Force rebuild the Docker image before running |
 | `--verbose` | Show raw Docker build output instead of the spinner |
-| `--chrome` | Launch Chrome on the host and inject a `chrome-devtools` MCP server into the container |
+| `--chrome` | Launch Chrome on the host and inject a `chrome-devtools` MCP server into the container. Merges with existing `~/.mcp.json` if present. |
 | `--env KEY=VALUE` | Inject an env var into the container (repeatable) |
 | `--env-file <path>` | Inject env vars from a dotenv-style file (repeatable) |
 | `-p`, `--print` | Headless mode — drop TTY, pass `-p` to Claude |
@@ -232,6 +232,7 @@ Each strategy lives in `strategies/<name>/` with:
 | tmux | Always | Captures `claude setup-token` output; used for session management |
 | Claude Code | Always | `npm install -g @anthropic-ai/claude-code` — [docs](https://docs.anthropic.com/en/docs/claude-code) |
 | Chrome | `--chrome` only | Browser automation via Chrome DevTools Protocol |
+| jq | `--chrome` only | Merges chrome-devtools MCP server into existing `~/.mcp.json` config |
 | PostgreSQL | Rails only | Expected on localhost:5432 |
 | Android device | Android only | Physical device with wireless debugging enabled |
 
