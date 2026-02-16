@@ -1358,10 +1358,18 @@ run_with_strategy() {
     docker_args+=(-v "${HOME}/.claude/CLAUDE.md:/home/claude/.claude/CLAUDE.md:ro")
   fi
 
-  # Mount host settings read-only
+  # Mount host settings read-only, stripping hooks that reference host-only
+  # commands (e.g. afplay, bd) which would fail inside the container.
   for settings_file in settings.json settings.local.json; do
     if [[ -f "${HOME}/.claude/${settings_file}" ]]; then
-      docker_args+=(-v "${HOME}/.claude/${settings_file}:/home/claude/.claude/${settings_file}:ro")
+      if command -v jq &>/dev/null && jq -e '.hooks' "${HOME}/.claude/${settings_file}" &>/dev/null; then
+        local sanitized
+        sanitized=$(mktemp /tmp/claude-yolo-settings-XXXXXX)
+        jq 'del(.hooks)' "${HOME}/.claude/${settings_file}" > "$sanitized"
+        docker_args+=(-v "${sanitized}:/home/claude/.claude/${settings_file}:ro")
+      else
+        docker_args+=(-v "${HOME}/.claude/${settings_file}:/home/claude/.claude/${settings_file}:ro")
+      fi
     fi
   done
 
@@ -1525,7 +1533,7 @@ run_with_strategy() {
 CDPJSON
 )
 
-    local existing_mcp="${HOME}/.mcp.json"
+    local existing_mcp="${worktree_path}/.mcp.json"
     if [[ -f "$existing_mcp" ]] && jq empty "$existing_mcp" 2>/dev/null; then
       jq --argjson entry "$chrome_devtools_entry" \
         '.mcpServers["chrome-devtools"] = $entry' \
@@ -1535,7 +1543,7 @@ CDPJSON
         '{"mcpServers":{"chrome-devtools":$entry}}' > "$mcp_config"
     fi
 
-    docker_args+=(-v "${mcp_config}:/home/claude/.mcp.json:ro")
+    docker_args+=(-v "${mcp_config}:/workspace/.mcp.json:ro")
     info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
   fi
 

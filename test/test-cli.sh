@@ -1305,7 +1305,7 @@ section "--chrome MCP config volume mount"
 exec_cmd_line=$(echo "$output_chrome" | grep "EXEC_CMD:" || true)
 
 assert_contains "Docker args include .mcp.json mount" "$exec_cmd_line" ".mcp.json:ro"
-assert_contains "Docker args mount to /home/claude/.mcp.json" "$exec_cmd_line" "/home/claude/.mcp.json"
+assert_contains "Docker args mount to /workspace/.mcp.json" "$exec_cmd_line" "/workspace/.mcp.json"
 
 # Without --chrome, docker args should NOT include .mcp.json mount
 exec_cmd_no_chrome=$(echo "$output_no_chrome" | grep "EXEC_CMD:" || true)
@@ -1429,17 +1429,17 @@ section "--chrome temp file creation"
 # Verify the mounted MCP config path follows the expected pattern
 mcp_mount_arg=$(echo "$exec_cmd_line" | tr ' ' '\n' | grep '.mcp.json' || true)
 assert_match "MCP mount uses /tmp temp file" "$mcp_mount_arg" '/tmp/claude-yolo-mcp-[a-zA-Z0-9]+'
-assert_contains "MCP mount target is /home/claude/.mcp.json" "$mcp_mount_arg" ":/home/claude/.mcp.json:ro"
+assert_contains "MCP mount target is /workspace/.mcp.json" "$mcp_mount_arg" ":/workspace/.mcp.json:ro"
 
 ########################################
-# Tests: --chrome merges existing ~/.mcp.json
+# Tests: --chrome merges existing project .mcp.json
 ########################################
 
 if command -v jq &>/dev/null; then
-  section "--chrome merges into existing ~/.mcp.json"
+  section "--chrome merges into existing project .mcp.json"
 
-  # Place a pre-existing .mcp.json with a custom server
-  cat > "$CLI_HOME/.mcp.json" <<'EXISTINGMCP'
+  # Place a pre-existing .mcp.json in the project directory
+  cat > "$RAILS_DIR/.mcp.json" <<'EXISTINGMCP'
 {"mcpServers":{"my-custom-server":{"command":"node","args":["server.js"]}}}
 EXISTINGMCP
 
@@ -1479,13 +1479,13 @@ EXISTINGMCP
     fail "Merged MCP config file not found at $merge_mcp_path"
   fi
 
-  rm -f "$CLI_HOME/.mcp.json"
+  rm -f "$RAILS_DIR/.mcp.json"
   rm -f "$merge_mcp_path"
 
-  section "--chrome works without pre-existing ~/.mcp.json"
+  section "--chrome works without pre-existing project .mcp.json"
 
-  # Ensure no pre-existing config
-  rm -f "$CLI_HOME/.mcp.json"
+  # Ensure no pre-existing config in project directory
+  rm -f "$RAILS_DIR/.mcp.json"
 
   output_no_existing=$(bash -c '
     '"$_chrome_mock_prefix"'
