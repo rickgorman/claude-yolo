@@ -1281,14 +1281,54 @@ run_with_strategy() {
     -w /workspace
   )
 
-  # Claude OAuth token for container authentication
-  local oauth_token=""
-  if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
-    oauth_token=$(grep -o '"accessToken":"[^"]*"' "${HOME}/.claude/.credentials.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  # Claude OAuth credentials for container authentication.
+  # On macOS, Claude Code stores the full credential set (accessToken +
+  # refreshToken) in the Keychain.  The ~/.claude/.credentials.json file
+  # typically only has a stale accessToken snapshot that expires quickly.
+  # We try, in order:
+  #   1. Credentials file with refreshToken (complete — mount as-is)
+  #   2. macOS Keychain (full payload with refreshToken)
+  #   3. Credentials file accessToken via env var (may be expired)
+  local creds_injected=false
+  local creds_file="${HOME}/.claude/.credentials.json"
+  if [[ -f "$creds_file" ]] && grep -q '"refreshToken"' "$creds_file" 2>/dev/null; then
+    local creds_copy
+    creds_copy=$(mktemp /tmp/claude-yolo-creds-XXXXXX)
+    cp "$creds_file" "$creds_copy"
+    docker_args+=(-v "${creds_copy}:/home/claude/.claude/.credentials.json")
+    creds_injected=true
+    success "Claude OAuth credentials injected"
   fi
-  if [[ -n "$oauth_token" ]]; then
-    docker_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${oauth_token}")
-    success "Claude OAuth token injected"
+  if [[ "$creds_injected" != true ]] && [[ "$(uname)" == "Darwin" ]]; then
+    local keychain_svc
+    keychain_svc=$(security dump-keychain 2>/dev/null \
+      | grep '"svce"' \
+      | grep 'Claude Code-credentials' \
+      | head -1 \
+      | sed 's/.*"Claude Code-credentials-/Claude Code-credentials-/' \
+      | sed 's/".*//' || true)
+    if [[ -n "$keychain_svc" ]]; then
+      local keychain_creds
+      keychain_creds=$(security find-generic-password -s "$keychain_svc" -w 2>/dev/null) || true
+      if [[ -n "$keychain_creds" ]]; then
+        local creds_copy
+        creds_copy=$(mktemp /tmp/claude-yolo-creds-XXXXXX)
+        echo "$keychain_creds" > "$creds_copy"
+        docker_args+=(-v "${creds_copy}:/home/claude/.claude/.credentials.json")
+        creds_injected=true
+        success "Claude OAuth credentials injected (Keychain)"
+      fi
+    fi
+  fi
+  if [[ "$creds_injected" != true ]]; then
+    local oauth_token=""
+    if [[ -f "$creds_file" ]]; then
+      oauth_token=$(grep -o '"accessToken":"[^"]*"' "$creds_file" 2>/dev/null | head -1 | cut -d'"' -f4)
+    fi
+    if [[ -n "$oauth_token" ]]; then
+      docker_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${oauth_token}")
+      success "Claude OAuth token injected"
+    fi
   fi
 
   # Seed container with a copy of ~/.claude.json to skip onboarding.

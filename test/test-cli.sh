@@ -191,7 +191,7 @@ mkdir -p "$EMPTY_DIR"
 # Shared mock HOME with Claude credentials for CLI integration tests
 CLI_HOME="$TMPDIR_BASE/cli-test-home"
 mkdir -p "$CLI_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$CLI_HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token","refreshToken":"fake-refresh-token"}}' > "$CLI_HOME/.claude/.credentials.json"
 
 ########################################
 # Tests: Color system
@@ -1089,7 +1089,7 @@ mkdir -p "$FAKE_HOME/.claude/commands"
 echo "test" > "$FAKE_HOME/.claude/commands/test.md"
 echo '{}' > "$FAKE_HOME/.claude/settings.json"
 echo '{}' > "$FAKE_HOME/.claude/settings.local.json"
-echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$FAKE_HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token","refreshToken":"fake-refresh-token"}}' > "$FAKE_HOME/.claude/.credentials.json"
 
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
@@ -1793,7 +1793,7 @@ section "find_github_token — not found"
 
 EMPTY_HOME="$TMPDIR_BASE/empty-home-for-token"
 mkdir -p "$EMPTY_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$EMPTY_HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token","refreshToken":"fake-refresh-token"}}' > "$EMPTY_HOME/.claude/.credentials.json"
 _GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
 GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$EMPTY_HOME" find_github_token "$EMPTY_DIR" && status=0 || status=1
 assert_eq "find_github_token returns failure when nothing found" "1" "$status"
@@ -2513,7 +2513,7 @@ EOF
 YOLO_ENV_DOCKER_LOG="$TMPDIR_BASE/docker-yolo-env.log"
 YOLO_ENV_TRUST_DIR="$TMPDIR_BASE/yolo-env-trust-home"
 mkdir -p "$YOLO_ENV_TRUST_DIR/.claude"
-echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$YOLO_ENV_TRUST_DIR/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token","refreshToken":"fake-refresh-token"}}' > "$YOLO_ENV_TRUST_DIR/.claude/.credentials.json"
 
 cat > "$MOCK_BIN/docker" << MOCKEOF
 #!/usr/bin/env bash
@@ -2727,7 +2727,7 @@ output_trust_yolo=$(bash -c '
   cd "'"$YOLO_ENV_DIR"'"
   HOME="'"$TMPDIR_BASE/trust-yolo-test-home"'"
   mkdir -p "$HOME/.claude"
-  echo '"'"'{"claudeAiOauth":{"accessToken":"fake-test-token"}}'"'"' > "$HOME/.claude/.credentials.json"
+  echo '"'"'{"claudeAiOauth":{"accessToken":"fake-test-token","refreshToken":"fake-refresh-token"}}'"'"' > "$HOME/.claude/.credentials.json"
   bash "'"$CLI"'" --yolo --strategy generic --trust-yolo 2>&1
 ' 2>&1 || true)
 
@@ -2795,7 +2795,7 @@ EOF
 YOLO_DOCKERFILE_DOCKER_LOG="$TMPDIR_BASE/docker-yolo-dockerfile.log"
 YOLO_DOCKERFILE_HOME="$TMPDIR_BASE/yolo-dockerfile-home"
 mkdir -p "$YOLO_DOCKERFILE_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$YOLO_DOCKERFILE_HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token","refreshToken":"fake-refresh-token"}}' > "$YOLO_DOCKERFILE_HOME/.claude/.credentials.json"
 
 _dockerfile_build_called=false
 cat > "$MOCK_BIN/docker" << MOCKEOF
@@ -2944,6 +2944,13 @@ exit 0
 MOCKEOF
 chmod +x "$MOCK_BIN/sleep"
 
+# No-op security mock to prevent real macOS Keychain access in tests
+cat > "$MOCK_BIN/security" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/security"
+
 output_setup_token=$(cd "$SETUP_TOKEN_DIR" && \
   HOME="$SETUP_TOKEN_HOME" \
   PATH="$MOCK_BIN:$PATH" \
@@ -2980,7 +2987,7 @@ touch "$OAUTH_TOKEN_DIR/Gemfile"
 
 OAUTH_TOKEN_HOME="$TMPDIR_BASE/oauth-token-home"
 mkdir -p "$OAUTH_TOKEN_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"my-oauth-test-token"}}' > "$OAUTH_TOKEN_HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"my-oauth-test-token","refreshToken":"my-refresh-token"}}' > "$OAUTH_TOKEN_HOME/.claude/.credentials.json"
 
 OAUTH_TOKEN_DOCKER_LOG="$TMPDIR_BASE/docker-oauth-token.log"
 
@@ -3006,8 +3013,8 @@ output_oauth=$(cd "$OAUTH_TOKEN_DIR" && \
 
 oauth_docker_args=$(cat "$OAUTH_TOKEN_DOCKER_LOG" 2>/dev/null || echo "")
 
-assert_contains "Docker args include CLAUDE_CODE_OAUTH_TOKEN" "$oauth_docker_args" "CLAUDE_CODE_OAUTH_TOKEN=my-oauth-test-token"
-assert_contains "Output shows token injected message" "$output_oauth" "Claude OAuth token injected"
+assert_contains "Docker args mount credentials file" "$oauth_docker_args" ".credentials.json"
+assert_contains "Output shows credentials injected message" "$output_oauth" "Claude OAuth credentials injected"
 
 ########################################
 # Tests: no OAuth token without credentials
@@ -3073,7 +3080,7 @@ touch "$CLAUDEJSON_DIR/Gemfile"
 
 CLAUDEJSON_HOME="$TMPDIR_BASE/claudejson-home"
 mkdir -p "$CLAUDEJSON_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"cj-token"}}' > "$CLAUDEJSON_HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"cj-token","refreshToken":"cj-refresh-token"}}' > "$CLAUDEJSON_HOME/.claude/.credentials.json"
 echo '{"hasCompletedOnboarding":true}' > "$CLAUDEJSON_HOME/.claude.json"
 
 CLAUDEJSON_DOCKER_LOG="$TMPDIR_BASE/docker-claudejson.log"
