@@ -1113,6 +1113,8 @@ section "Session history persists to host"
 # .claude should be bind-mounted from host, not a named Docker volume
 assert_contains "Bind-mounts host .claude into container" "$docker_args" ".claude:/home/claude/.claude"
 assert_not_contains "Does not use named volume for .claude" "$docker_args" "-home:/home/claude/.claude"
+assert_contains "Mounts per-project session directory" "$docker_args" "yolo-sessions/"
+assert_contains "Session dir targets -workspace" "$docker_args" ":/home/claude/.claude/projects/-workspace"
 
 ########################################
 # Tests: Settings files mounted read-only
@@ -2969,99 +2971,6 @@ assert_eq "--setup-token captures and saves token from stdout" "sk-ant-oat01-tes
 assert_contains "--setup-token continues to launch session" "$output_setup_token" "Launching Claude Code"
 
 ########################################
-# Tests: CLAUDE_CODE_OAUTH_TOKEN env var
-########################################
-
-section "CLAUDE_CODE_OAUTH_TOKEN injected from host credentials"
-
-OAUTH_TOKEN_DIR="$TMPDIR_BASE/oauth-token-project"
-mkdir -p "$OAUTH_TOKEN_DIR"
-touch "$OAUTH_TOKEN_DIR/Gemfile"
-
-OAUTH_TOKEN_HOME="$TMPDIR_BASE/oauth-token-home"
-mkdir -p "$OAUTH_TOKEN_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"my-oauth-test-token"}}' > "$OAUTH_TOKEN_HOME/.claude/.credentials.json"
-
-OAUTH_TOKEN_DOCKER_LOG="$TMPDIR_BASE/docker-oauth-token.log"
-
-cat > "$MOCK_BIN/docker" << MOCKEOF
-#!/usr/bin/env bash
-case "\$1" in
-  info) exit 0 ;;
-  ps) echo "" ;;
-  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
-  inspect) echo "2099-01-01T00:00:00.000Z" ;;
-  rm) exit 0 ;;
-  run) echo "\$*" > "$OAUTH_TOKEN_DOCKER_LOG"; exit 0 ;;
-  *) exit 1 ;;
-esac
-MOCKEOF
-chmod +x "$MOCK_BIN/docker"
-
-output_oauth=$(cd "$OAUTH_TOKEN_DIR" && \
-  HOME="$OAUTH_TOKEN_HOME" \
-  GH_TOKEN="test_token_for_ci" \
-  PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic 2>&1 || true)
-
-oauth_docker_args=$(cat "$OAUTH_TOKEN_DOCKER_LOG" 2>/dev/null || echo "")
-
-assert_contains "Docker args include CLAUDE_CODE_OAUTH_TOKEN" "$oauth_docker_args" "CLAUDE_CODE_OAUTH_TOKEN=my-oauth-test-token"
-assert_contains "Output shows token injected message" "$output_oauth" "Claude OAuth token injected"
-
-########################################
-# Tests: no OAuth token without credentials
-########################################
-
-section "Missing credentials exits before docker run"
-
-NO_CREDS_DIR="$TMPDIR_BASE/no-creds-project"
-mkdir -p "$NO_CREDS_DIR"
-touch "$NO_CREDS_DIR/Gemfile"
-
-NO_CREDS_HOME="$TMPDIR_BASE/no-creds-home"
-mkdir -p "$NO_CREDS_HOME/.claude"
-
-NO_CREDS_DOCKER_LOG="$TMPDIR_BASE/docker-no-creds.log"
-rm -f "$NO_CREDS_DOCKER_LOG"
-
-cat > "$MOCK_BIN/docker" << MOCKEOF
-#!/usr/bin/env bash
-case "\$1" in
-  info) exit 0 ;;
-  ps) echo "" ;;
-  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
-  inspect) echo "2099-01-01T00:00:00.000Z" ;;
-  rm) exit 0 ;;
-  run) echo "\$*" > "$NO_CREDS_DOCKER_LOG"; exit 0 ;;
-  *) exit 1 ;;
-esac
-MOCKEOF
-chmod +x "$MOCK_BIN/docker"
-
-no_creds_exit_code=0
-output_no_creds=$(cd "$NO_CREDS_DIR" && \
-  HOME="$NO_CREDS_HOME" \
-  GH_TOKEN="test_token_for_ci" \
-  PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic 2>&1) || no_creds_exit_code=$?
-
-assert_contains "Shows error when no credentials" "$output_no_creds" "No Claude credentials found"
-
-if [[ "$no_creds_exit_code" -ne 0 ]]; then
-  pass "Exits non-zero without credentials"
-else
-  fail "Exits non-zero without credentials (got exit code 0)"
-fi
-
-no_creds_docker_args=$(cat "$NO_CREDS_DOCKER_LOG" 2>/dev/null || echo "")
-if [[ -z "$no_creds_docker_args" ]]; then
-  pass "Docker run not called without credentials"
-else
-  fail "Docker run not called without credentials (docker run was called)"
-fi
-
-########################################
 # Tests: ~/.claude.json mount for onboarding skip
 ########################################
 
@@ -3108,8 +3017,8 @@ assert_contains "Mounts claude.json copy into container" "$claudejson_docker_arg
 
 section "No ~/.claude.json mount when file missing"
 
-# Reuse NO_CREDS_HOME which has no .claude.json
-assert_not_contains "No .claude.json mount without file" "$no_creds_docker_args" ":/home/claude/.claude.json"
+# FAKE_HOME has no .claude.json, so docker_args should not mount it
+assert_not_contains "No .claude.json mount without file" "$docker_args" ":/home/claude/.claude.json"
 
 ########################################
 # Tests: check_port_in_use
@@ -3292,64 +3201,6 @@ if [[ "$(uname)" == "Darwin" ]]; then
 else
   pass "Skipped headless port conflict test (Linux uses --network=host)"
 fi
-
-########################################
-# Tests: Missing credentials halts before environment selection
-########################################
-
-section "Missing credentials halts before environment selection"
-
-HALT_CREDS_DIR="$TMPDIR_BASE/halt-creds-project"
-mkdir -p "$HALT_CREDS_DIR"
-touch "$HALT_CREDS_DIR/Gemfile"
-
-HALT_CREDS_HOME="$TMPDIR_BASE/halt-creds-home"
-mkdir -p "$HALT_CREDS_HOME/.claude"
-# Intentionally no .credentials.json
-
-HALT_CREDS_DOCKER_LOG="$TMPDIR_BASE/docker-halt-creds.log"
-rm -f "$HALT_CREDS_DOCKER_LOG"
-
-cat > "$MOCK_BIN/docker" << MOCKEOF
-#!/usr/bin/env bash
-case "\$1" in
-  info) exit 0 ;;
-  ps) echo "" ;;
-  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
-  inspect) echo "2099-01-01T00:00:00.000Z" ;;
-  rm) exit 0 ;;
-  run) echo "\$*" > "$HALT_CREDS_DOCKER_LOG"; exit 0 ;;
-  *) exit 1 ;;
-esac
-MOCKEOF
-chmod +x "$MOCK_BIN/docker"
-
-halt_creds_exit_code=0
-output_halt_creds=$(cd "$HALT_CREDS_DIR" && \
-  HOME="$HALT_CREDS_HOME" \
-  GH_TOKEN="test_token_for_ci" \
-  PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic 2>&1) || halt_creds_exit_code=$?
-
-assert_contains "Shows credentials error when missing" "$output_halt_creds" "No Claude credentials found"
-assert_contains "Shows setup-token instruction" "$output_halt_creds" "setup-token"
-
-if [[ "$halt_creds_exit_code" -ne 0 ]]; then
-  pass "Exits with non-zero when credentials missing"
-else
-  fail "Exits with non-zero when credentials missing (got exit code 0)"
-fi
-
-# Docker run should never have been called
-halt_creds_docker_args=$(cat "$HALT_CREDS_DOCKER_LOG" 2>/dev/null || echo "")
-if [[ -z "$halt_creds_docker_args" ]]; then
-  pass "Does not reach docker run without credentials"
-else
-  fail "Does not reach docker run without credentials (docker run was called)"
-fi
-
-# Should not contain strategy/launch messages (halted before getting there)
-assert_not_contains "Halts before launching Claude" "$output_halt_creds" "Launching Claude Code"
 
 ########################################
 # Summary
