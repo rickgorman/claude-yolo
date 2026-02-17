@@ -188,6 +188,11 @@ EOF
 EMPTY_DIR="$TMPDIR_BASE/empty-project"
 mkdir -p "$EMPTY_DIR"
 
+# Shared mock HOME with Claude credentials for CLI integration tests
+CLI_HOME="$TMPDIR_BASE/cli-test-home"
+mkdir -p "$CLI_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$CLI_HOME/.claude/.credentials.json"
+
 ########################################
 # Tests: Color system
 ########################################
@@ -856,6 +861,7 @@ assert_contains "Shows error when docker not running" "$output" "Docker is not r
 section "CLI integration — --strategy with bad name"
 
 output=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   docker() {
     case "$1" in
       info) return 0 ;;
@@ -874,6 +880,7 @@ assert_contains "Bad strategy shows error" "$output" "Unknown strategy: nonexist
 section "CLI integration — output formatting (no detection)"
 
 output=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   docker() {
     case "$1" in
       info) return 0 ;;
@@ -901,6 +908,7 @@ assert_contains "Output shows go description" "$output" "Go"
 section "CLI integration — invalid menu selection"
 
 output=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   docker() {
     case "$1" in
       info) return 0 ;;
@@ -921,6 +929,7 @@ assert_contains "Non-numeric input shows error" "$output" "Invalid selection"
 section "CLI integration — out-of-range menu selection"
 
 output=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   docker() {
     case "$1" in
       info) return 0 ;;
@@ -941,6 +950,7 @@ assert_contains "Out-of-range selection shows error" "$output" "Invalid selectio
 section "CLI integration — auto-detect high confidence"
 
 output=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -985,6 +995,7 @@ assert_contains "Shows footer" "$output" "└"
 section "CLI integration — --strategy generic"
 
 output_generic=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -1102,6 +1113,8 @@ section "Session history persists to host"
 # .claude should be bind-mounted from host, not a named Docker volume
 assert_contains "Bind-mounts host .claude into container" "$docker_args" ".claude:/home/claude/.claude"
 assert_not_contains "Does not use named volume for .claude" "$docker_args" "-home:/home/claude/.claude"
+assert_contains "Mounts per-project session directory" "$docker_args" "yolo-sessions/"
+assert_contains "Session dir targets -workspace" "$docker_args" ":/home/claude/.claude/projects/-workspace"
 
 ########################################
 # Tests: Settings files mounted read-only
@@ -1224,6 +1237,7 @@ fi
 # Helper: standard docker + exec mock for chrome tests
 # Overrides both docker (for API calls) and exec (to capture final docker run args)
 _chrome_mock_prefix='
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   exec() { echo "EXEC_CMD: $*"; command exit 0; }
   export -f exec
@@ -1293,7 +1307,7 @@ section "--chrome MCP config volume mount"
 exec_cmd_line=$(echo "$output_chrome" | grep "EXEC_CMD:" || true)
 
 assert_contains "Docker args include .mcp.json mount" "$exec_cmd_line" ".mcp.json:ro"
-assert_contains "Docker args mount to /home/claude/.mcp.json" "$exec_cmd_line" "/home/claude/.mcp.json"
+assert_contains "Docker args mount to /workspace/.mcp.json" "$exec_cmd_line" "/workspace/.mcp.json"
 
 # Without --chrome, docker args should NOT include .mcp.json mount
 exec_cmd_no_chrome=$(echo "$output_no_chrome" | grep "EXEC_CMD:" || true)
@@ -1314,7 +1328,12 @@ _chrome_test_hash=$(path_hash "$_chrome_resolved_path")
 _chrome_expected_port=$(cdp_port_for_hash "$_chrome_test_hash")
 
 assert_contains "Chrome output shows computed port" "$output_chrome" "port ${_chrome_expected_port}"
-assert_contains "CHROME_CDP_URL uses computed port" "$exec_cmd_line" "CHROME_CDP_URL=http://localhost:${_chrome_expected_port}"
+if [[ "$(uname)" == "Darwin" ]]; then
+  _chrome_expected_host="host.docker.internal"
+else
+  _chrome_expected_host="localhost"
+fi
+assert_contains "CHROME_CDP_URL uses computed port" "$exec_cmd_line" "CHROME_CDP_URL=http://${_chrome_expected_host}:${_chrome_expected_port}"
 
 ########################################
 # Tests: --chrome docker run args structure
@@ -1344,6 +1363,13 @@ section "--chrome MCP config content"
 _rails_hash=$(path_hash "$RAILS_DIR")
 _expected_port=$(cdp_port_for_hash "$_rails_hash")
 
+# Determine expected hostname (same logic as the CLI)
+if [[ "$(uname)" == "Darwin" ]]; then
+  _expected_cdp_host="host.docker.internal"
+else
+  _expected_cdp_host="localhost"
+fi
+
 # Generate the same MCP config the CLI generates and validate it
 mcp_test_config="$TMPDIR_BASE/mcp-config-test.json"
 cat > "$mcp_test_config" <<MCPEOF
@@ -1351,7 +1377,7 @@ cat > "$mcp_test_config" <<MCPEOF
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:${_expected_port}"]
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://${_expected_cdp_host}:${_expected_port}"]
     }
   }
 }
@@ -1378,7 +1404,7 @@ if command -v jq &>/dev/null; then
   assert_contains "MCP server package is chrome-devtools-mcp" "$pkg_arg" "chrome-devtools-mcp"
 
   url_arg=$(jq -r '.mcpServers["chrome-devtools"].args[2]' "$mcp_test_config")
-  assert_eq "MCP server points to computed port" "--browser-url=http://localhost:${_expected_port}" "$url_arg"
+  assert_eq "MCP server points to computed port" "--browser-url=http://${_expected_cdp_host}:${_expected_port}" "$url_arg"
 
   num_servers=$(jq '.mcpServers | length' "$mcp_test_config")
   assert_eq "MCP config has exactly one server" "1" "$num_servers"
@@ -1391,7 +1417,7 @@ else
   assert_contains "MCP config has mcpServers key" "$content" '"mcpServers"'
   assert_contains "MCP config has chrome-devtools server" "$content" '"chrome-devtools"'
   assert_contains "MCP config uses npx" "$content" '"command": "npx"'
-  assert_contains "MCP config targets computed port" "$content" "localhost:${_expected_port}"
+  assert_contains "MCP config targets computed port" "$content" "${_expected_cdp_host}:${_expected_port}"
 fi
 
 rm -f "$mcp_test_config"
@@ -1405,7 +1431,93 @@ section "--chrome temp file creation"
 # Verify the mounted MCP config path follows the expected pattern
 mcp_mount_arg=$(echo "$exec_cmd_line" | tr ' ' '\n' | grep '.mcp.json' || true)
 assert_match "MCP mount uses /tmp temp file" "$mcp_mount_arg" '/tmp/claude-yolo-mcp-[a-zA-Z0-9]+'
-assert_contains "MCP mount target is /home/claude/.mcp.json" "$mcp_mount_arg" ":/home/claude/.mcp.json:ro"
+assert_contains "MCP mount target is /workspace/.mcp.json" "$mcp_mount_arg" ":/workspace/.mcp.json:ro"
+
+########################################
+# Tests: --chrome merges existing project .mcp.json
+########################################
+
+if command -v jq &>/dev/null; then
+  section "--chrome merges into existing project .mcp.json"
+
+  # Place a pre-existing .mcp.json in the project directory
+  cat > "$RAILS_DIR/.mcp.json" <<'EXISTINGMCP'
+{"mcpServers":{"my-custom-server":{"command":"node","args":["server.js"]}}}
+EXISTINGMCP
+
+  output_merge=$(bash -c '
+    '"$_chrome_mock_prefix"'
+    curl() {
+      case "$*" in
+        *api.github.com*) echo "200"; return 0 ;;
+        *) return 0 ;;
+      esac
+    }
+    export -f curl
+    cd "'"$RAILS_DIR"'"
+    bash "'"$CLI"'" --yolo --chrome --strategy rails 2>&1
+  ' 2>&1 || true)
+
+  merge_exec_cmd=$(echo "$output_merge" | grep "EXEC_CMD:" || true)
+  merge_mcp_mount=$(echo "$merge_exec_cmd" | tr ' ' '\n' | grep '.mcp.json' || true)
+  merge_mcp_path=$(echo "$merge_mcp_mount" | cut -d: -f1)
+
+  if [[ -f "$merge_mcp_path" ]]; then
+    num_servers=$(jq '.mcpServers | length' "$merge_mcp_path")
+    assert_eq "Merged config has 2 servers" "2" "$num_servers"
+
+    custom_cmd=$(jq -r '.mcpServers["my-custom-server"].command' "$merge_mcp_path")
+    assert_eq "Custom server preserved" "node" "$custom_cmd"
+
+    custom_args=$(jq -r '.mcpServers["my-custom-server"].args[0]' "$merge_mcp_path")
+    assert_eq "Custom server args preserved" "server.js" "$custom_args"
+
+    chrome_cmd=$(jq -r '.mcpServers["chrome-devtools"].command' "$merge_mcp_path")
+    assert_eq "chrome-devtools added with npx" "npx" "$chrome_cmd"
+
+    chrome_url=$(jq -r '.mcpServers["chrome-devtools"].args[2]' "$merge_mcp_path")
+    assert_contains "chrome-devtools has browser-url" "$chrome_url" "--browser-url=http://"
+  else
+    fail "Merged MCP config file not found at $merge_mcp_path"
+  fi
+
+  rm -f "$RAILS_DIR/.mcp.json"
+  rm -f "$merge_mcp_path"
+
+  section "--chrome works without pre-existing project .mcp.json"
+
+  # Ensure no pre-existing config in project directory
+  rm -f "$RAILS_DIR/.mcp.json"
+
+  output_no_existing=$(bash -c '
+    '"$_chrome_mock_prefix"'
+    curl() {
+      case "$*" in
+        *api.github.com*) echo "200"; return 0 ;;
+        *) return 0 ;;
+      esac
+    }
+    export -f curl
+    cd "'"$RAILS_DIR"'"
+    bash "'"$CLI"'" --yolo --chrome --strategy rails 2>&1
+  ' 2>&1 || true)
+
+  no_existing_exec=$(echo "$output_no_existing" | grep "EXEC_CMD:" || true)
+  no_existing_mount=$(echo "$no_existing_exec" | tr ' ' '\n' | grep '.mcp.json' || true)
+  no_existing_path=$(echo "$no_existing_mount" | cut -d: -f1)
+
+  if [[ -f "$no_existing_path" ]]; then
+    num_servers=$(jq '.mcpServers | length' "$no_existing_path")
+    assert_eq "Fresh config has 1 server" "1" "$num_servers"
+
+    chrome_cmd=$(jq -r '.mcpServers["chrome-devtools"].command' "$no_existing_path")
+    assert_eq "Fresh config chrome-devtools uses npx" "npx" "$chrome_cmd"
+  else
+    fail "Fresh MCP config file not found at $no_existing_path"
+  fi
+
+  rm -f "$no_existing_path"
+fi
 
 ########################################
 # Tests: --chrome with multiple strategies
@@ -1682,7 +1794,8 @@ assert_contains "find_github_token reports gh config source" "$_GITHUB_TOKEN_SOU
 section "find_github_token — not found"
 
 EMPTY_HOME="$TMPDIR_BASE/empty-home-for-token"
-mkdir -p "$EMPTY_HOME"
+mkdir -p "$EMPTY_HOME/.claude"
+echo '{"claudeAiOauth":{"accessToken":"fake-test-token"}}' > "$EMPTY_HOME/.claude/.credentials.json"
 _GITHUB_TOKEN="" _GITHUB_TOKEN_SOURCE=""
 GH_TOKEN="" GITHUB_TOKEN="" XDG_CONFIG_HOME="" HOME="$EMPTY_HOME" find_github_token "$EMPTY_DIR" && status=0 || status=1
 assert_eq "find_github_token returns failure when nothing found" "1" "$status"
@@ -1770,6 +1883,7 @@ assert_not_contains "Missing token does not reach docker run" "$output_no_token"
 section "GitHub token — invalid halts execution"
 
 output_bad_token=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=ghp_definitely_invalid
   docker() {
     case "$1" in
@@ -1979,6 +2093,7 @@ section "-p / --print headless mode"
 
 # Use the exec-capturing mock from chrome tests
 PRINT_OUTPUT=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   exec() { echo "EXEC_CMD: $*"; command exit 0; }
   export -f exec
@@ -2016,6 +2131,7 @@ assert_contains "-p mode still runs docker" "$print_exec_cmd" "docker run"
 section "--print flag works same as -p"
 
 PRINT_LONG_OUTPUT=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   exec() { echo "EXEC_CMD: $*"; command exit 0; }
   export -f exec
@@ -2121,6 +2237,7 @@ unset -f curl
 section "GitHub token scope — broad token blocks execution"
 
 output_broad=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -2154,6 +2271,7 @@ assert_not_contains "Broad scope does not reach docker run" "$output_broad" "Lau
 section "GitHub token scope — --trust-github-token overrides"
 
 output_trust=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -2189,6 +2307,7 @@ assert_not_contains "Trust flag does not block" "$output_trust" "Refusing to pro
 section "GitHub token scope — safe token passes without flag"
 
 output_safe=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -2260,6 +2379,7 @@ echo "# app" > "$YOLO_STRATEGY_DIR/config/application.rb"
 echo "generic" > "$YOLO_STRATEGY_DIR/.yolo/strategy"
 
 output_yolo_strategy=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -2302,6 +2422,7 @@ mkdir -p "$YOLO_BAD_STRATEGY_DIR/.yolo"
 echo "nonexistent_strategy" > "$YOLO_BAD_STRATEGY_DIR/.yolo/strategy"
 
 output_bad_yolo_strategy=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -2339,6 +2460,7 @@ assert_contains ".yolo/strategy warns on invalid name" "$output_bad_yolo_strateg
 section ".yolo/strategy does not override --strategy flag"
 
 output_flag_override=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   docker() {
     case "$1" in
@@ -2512,6 +2634,7 @@ _reset_resolved_path=$(cd "$RAILS_DIR" && pwd)
 _reset_hash=$(path_hash "$_reset_resolved_path")
 
 output_reset=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   _REMOVED_CONTAINERS=""
   docker() {
@@ -2621,6 +2744,7 @@ section "Container persistence (no --rm)"
 
 # Verify docker run does NOT include --rm flag
 output_persist=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   exec() { echo "EXEC_CMD: $*"; command exit 0; }
   export -f exec
@@ -2847,87 +2971,6 @@ assert_eq "--setup-token captures and saves token from stdout" "sk-ant-oat01-tes
 assert_contains "--setup-token continues to launch session" "$output_setup_token" "Launching Claude Code"
 
 ########################################
-# Tests: CLAUDE_CODE_OAUTH_TOKEN env var
-########################################
-
-section "CLAUDE_CODE_OAUTH_TOKEN injected from host credentials"
-
-OAUTH_TOKEN_DIR="$TMPDIR_BASE/oauth-token-project"
-mkdir -p "$OAUTH_TOKEN_DIR"
-touch "$OAUTH_TOKEN_DIR/Gemfile"
-
-OAUTH_TOKEN_HOME="$TMPDIR_BASE/oauth-token-home"
-mkdir -p "$OAUTH_TOKEN_HOME/.claude"
-echo '{"claudeAiOauth":{"accessToken":"my-oauth-test-token"}}' > "$OAUTH_TOKEN_HOME/.claude/.credentials.json"
-
-OAUTH_TOKEN_DOCKER_LOG="$TMPDIR_BASE/docker-oauth-token.log"
-
-cat > "$MOCK_BIN/docker" << MOCKEOF
-#!/usr/bin/env bash
-case "\$1" in
-  info) exit 0 ;;
-  ps) echo "" ;;
-  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
-  inspect) echo "2099-01-01T00:00:00.000Z" ;;
-  rm) exit 0 ;;
-  run) echo "\$*" > "$OAUTH_TOKEN_DOCKER_LOG"; exit 0 ;;
-  *) exit 1 ;;
-esac
-MOCKEOF
-chmod +x "$MOCK_BIN/docker"
-
-output_oauth=$(cd "$OAUTH_TOKEN_DIR" && \
-  HOME="$OAUTH_TOKEN_HOME" \
-  GH_TOKEN="test_token_for_ci" \
-  PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic 2>&1 || true)
-
-oauth_docker_args=$(cat "$OAUTH_TOKEN_DOCKER_LOG" 2>/dev/null || echo "")
-
-assert_contains "Docker args include CLAUDE_CODE_OAUTH_TOKEN" "$oauth_docker_args" "CLAUDE_CODE_OAUTH_TOKEN=my-oauth-test-token"
-assert_contains "Output shows token injected message" "$output_oauth" "Claude OAuth token injected"
-
-########################################
-# Tests: no OAuth token without credentials
-########################################
-
-section "No OAuth token without host credentials"
-
-NO_CREDS_DIR="$TMPDIR_BASE/no-creds-project"
-mkdir -p "$NO_CREDS_DIR"
-touch "$NO_CREDS_DIR/Gemfile"
-
-NO_CREDS_HOME="$TMPDIR_BASE/no-creds-home"
-mkdir -p "$NO_CREDS_HOME/.claude"
-
-NO_CREDS_DOCKER_LOG="$TMPDIR_BASE/docker-no-creds.log"
-
-cat > "$MOCK_BIN/docker" << MOCKEOF
-#!/usr/bin/env bash
-case "\$1" in
-  info) exit 0 ;;
-  ps) echo "" ;;
-  image) shift; case "\$1" in inspect) exit 0 ;; *) exit 1 ;; esac ;;
-  inspect) echo "2099-01-01T00:00:00.000Z" ;;
-  rm) exit 0 ;;
-  run) echo "\$*" > "$NO_CREDS_DOCKER_LOG"; exit 0 ;;
-  *) exit 1 ;;
-esac
-MOCKEOF
-chmod +x "$MOCK_BIN/docker"
-
-output_no_creds=$(cd "$NO_CREDS_DIR" && \
-  HOME="$NO_CREDS_HOME" \
-  GH_TOKEN="test_token_for_ci" \
-  PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic 2>&1 || true)
-
-no_creds_docker_args=$(cat "$NO_CREDS_DOCKER_LOG" 2>/dev/null || echo "")
-
-assert_not_contains "No CLAUDE_CODE_OAUTH_TOKEN without credentials" "$no_creds_docker_args" "CLAUDE_CODE_OAUTH_TOKEN"
-assert_contains "Shows warning when no credentials" "$output_no_creds" "No Claude credentials found"
-
-########################################
 # Tests: ~/.claude.json mount for onboarding skip
 ########################################
 
@@ -2966,7 +3009,7 @@ cd "$CLAUDEJSON_DIR" && \
 
 claudejson_docker_args=$(cat "$CLAUDEJSON_DOCKER_LOG" 2>/dev/null || echo "")
 
-assert_contains "Mounts ~/.claude.json into container" "$claudejson_docker_args" ".claude.json:/home/claude/.claude.json"
+assert_contains "Mounts claude.json copy into container" "$claudejson_docker_args" ":/home/claude/.claude.json"
 
 ########################################
 # Tests: no ~/.claude.json mount when file missing
@@ -2974,8 +3017,8 @@ assert_contains "Mounts ~/.claude.json into container" "$claudejson_docker_args"
 
 section "No ~/.claude.json mount when file missing"
 
-# Reuse NO_CREDS_HOME which has no .claude.json
-assert_not_contains "No .claude.json mount without file" "$no_creds_docker_args" ".claude.json:/home/claude/.claude.json"
+# FAKE_HOME has no .claude.json, so docker_args should not mount it
+assert_not_contains "No .claude.json mount without file" "$docker_args" ":/home/claude/.claude.json"
 
 ########################################
 # Tests: check_port_in_use
