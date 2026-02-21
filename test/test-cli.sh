@@ -1126,6 +1126,14 @@ assert_contains "Mounts settings.json read-only" "$docker_args" "settings.json:/
 assert_contains "Mounts settings.local.json read-only" "$docker_args" "settings.local.json:/home/claude/.claude/settings.local.json:ro"
 
 ########################################
+# Tests: Auto-updater disabled
+########################################
+
+section "Auto-updater disabled"
+
+assert_contains "Docker args include DISABLE_AUTOUPDATER=1" "$docker_args" "DISABLE_AUTOUPDATER=1"
+
+########################################
 # Tests: Git worktree mount
 ########################################
 

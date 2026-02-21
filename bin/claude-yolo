@@ -1347,6 +1347,7 @@ run_with_strategy() {
     -e "COLORTERM=${COLORTERM:-}"
     -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)"
     -e "LINES=$(tput lines 2>/dev/null || echo 40)"
+    -e "DISABLE_AUTOUPDATER=1"
     -w /workspace
   )
 
