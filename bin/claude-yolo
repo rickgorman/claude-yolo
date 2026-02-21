@@ -147,7 +147,15 @@ migrate_yolo_sessions() {
       fi
 
       if [[ -z "$worktree_path" ]]; then
-        warn "Cannot migrate yolo session ${hash}: worktree path unknown"
+        local has_files=false
+        for f in "${session_dir}"*; do
+          [[ -f "$f" ]] && { has_files=true; break; }
+        done
+        if [[ "$has_files" == true ]]; then
+          warn "Cannot migrate yolo session ${hash}: worktree path unknown"
+        else
+          rm -rf "$session_dir" 2>/dev/null || true
+        fi
         continue
       fi
 
