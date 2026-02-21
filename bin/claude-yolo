@@ -111,6 +111,68 @@ cdp_port_for_hash() {
 # Docker helpers
 ########################################
 
+migrate_yolo_sessions() {
+  local base_dir
+  for base_dir in "${HOME}"/.*/yolo-sessions/; do
+    [[ -d "$base_dir" ]] || continue
+
+    local session_dir
+    for session_dir in "${base_dir}"*/; do
+      [[ -d "$session_dir" ]] || continue
+
+      local hash
+      hash=$(basename "$session_dir")
+
+      if docker ps --filter "name=claude-yolo-${hash}" --format '{{.Names}}' 2>/dev/null \
+           | grep -q .; then
+        continue
+      fi
+
+      local worktree_path=""
+      local meta_file="${session_dir}.worktree-path"
+
+      if [[ -f "$meta_file" ]]; then
+        worktree_path=$(cat "$meta_file")
+      else
+        local container_name
+        container_name=$(docker ps -a \
+          --filter "name=claude-yolo-${hash}" \
+          --format '{{.Names}}' 2>/dev/null | head -1)
+
+        if [[ -n "$container_name" ]]; then
+          worktree_path=$(docker inspect "$container_name" \
+            --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' \
+            2>/dev/null || true)
+        fi
+      fi
+
+      if [[ -z "$worktree_path" ]]; then
+        warn "Cannot migrate yolo session ${hash}: worktree path unknown"
+        continue
+      fi
+
+      local encoded_path="${worktree_path//\//-}"
+      local target_dir="${HOME}/.claude/projects/${encoded_path}"
+      mkdir -p "$target_dir"
+
+      local moved=0
+      local f
+      for f in "${session_dir}"*; do
+        [[ -f "$f" ]] || continue
+        mv "$f" "$target_dir/"
+        moved=$((moved + 1))
+      done
+
+      if [[ $moved -gt 0 ]]; then
+        info "Migrated ${moved} session file(s) for ${worktree_path}"
+      fi
+
+      rm -f "${session_dir}.worktree-path"
+      rmdir "$session_dir" 2>/dev/null || true
+    done
+  done
+}
+
 check_dependencies() {
   local missing=()
 
@@ -1269,6 +1331,7 @@ run_with_strategy() {
   # session directory so containers don't resume each other's conversations.
   local session_dir="${HOME}/.claude/yolo-sessions/${hash}"
   mkdir -p "$session_dir"
+  echo "$worktree_path" > "${session_dir}/.worktree-path"
 
   local -a docker_args=(
     docker run ${tty_flags[@]+"${tty_flags[@]}"}
@@ -1584,6 +1647,14 @@ CDPJSON
     disown
   fi
 
+  # After the session ends, migrate completed yolo sessions back to the
+  # proper Claude project dirs so they are visible to `claude --resume`.
+  (
+    while kill -0 $$ 2>/dev/null; do sleep 1; done
+    migrate_yolo_sessions 2>/dev/null || true
+  ) &
+  disown
+
   exec "${docker_args[@]}"
 }
 
@@ -1807,6 +1878,8 @@ main() {
     fi
     force_build=true
   fi
+
+  migrate_yolo_sessions
 
   # Check for already-running container before running detection
   local running
