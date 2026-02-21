@@ -846,6 +846,63 @@ run_detection() {
   fi
 }
 
+# Scan immediate subdirectories for strategy matches.
+# Skips hidden dirs and common non-project directories.
+# Returns sorted detection results (same format as run_detection).
+run_detection_deep() {
+  local worktree_path="$1"
+  local all_results=()
+  local skip_dirs=("node_modules" "vendor" "tmp" "log" "public" ".bundle")
+
+  for subdir in "$worktree_path"/*/; do
+    [[ -d "$subdir" ]] || continue
+
+    local dirname
+    dirname=$(basename "$subdir")
+
+    [[ "$dirname" == .* ]] && continue
+
+    local skip=false
+    for skip_dir in "${skip_dirs[@]}"; do
+      [[ "$dirname" == "$skip_dir" ]] && { skip=true; break; }
+    done
+    $skip && continue
+
+    local sub_results
+    sub_results=$(run_detection "$subdir") || true
+
+    if [[ -n "$sub_results" ]]; then
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && all_results+=("$line")
+      done <<< "$sub_results"
+    fi
+  done
+
+  if [[ ${#all_results[@]} -gt 0 ]]; then
+    printf '%s\n' "${all_results[@]}" | sort -t: -k1 -rn
+  fi
+}
+
+# Non-interactively pick the best strategy for a directory.
+# Tries shallow detection first; falls back to deep scan if nothing found.
+detect_best_strategy() {
+  local worktree_path="$1"
+  local detections
+
+  detections=$(run_detection "$worktree_path")
+
+  if [[ -z "$detections" ]]; then
+    detections=$(run_detection_deep "$worktree_path")
+  fi
+
+  if [[ -n "$detections" ]]; then
+    echo "$detections" | head -1 | cut -d: -f2
+    return 0
+  fi
+
+  return 1
+}
+
 choose_strategy() {
   local worktree_path="$1"
   local detections
@@ -906,6 +963,24 @@ choose_strategy() {
 
     echo "$detections" | sed -n "${choice}p" | cut -d: -f2
     return 0
+  fi
+
+  # Nothing found at root — scan immediate subdirectories before giving up
+  local deep_detections
+  deep_detections=$(run_detection_deep "$worktree_path")
+
+  if [[ -n "$deep_detections" ]]; then
+    local top_confidence top_strategy top_evidence
+    top_confidence=$(echo "$deep_detections" | head -1 | cut -d: -f1)
+    top_strategy=$(echo "$deep_detections"   | head -1 | cut -d: -f2)
+    top_evidence=$(echo "$deep_detections"   | head -1 | cut -d: -f3-)
+
+    if [[ "$top_confidence" -ge 80 ]]; then
+      echo -e "  ${GREEN}●${RESET} Detected: ${BOLD}${top_strategy}${RESET} (${top_confidence}%, nested)" >&2
+      dim "  ${top_evidence}"
+      echo "$top_strategy"
+      return 0
+    fi
   fi
 
   choose_from_full_list "$worktree_path"
@@ -1794,6 +1869,7 @@ main() {
   local trust_yolo=false
   local reset_mode=false
   local setup_token_mode=false
+  local detect_only_path=""
   local -a extra_env=()
   local -a env_files=()
   local claude_args=()
@@ -1802,6 +1878,11 @@ main() {
     case "$1" in
       -h|--help)
         show_help
+        ;;
+      --detect)
+        [[ $# -ge 2 ]] || { fail "--detect requires a path argument"; exit 1; }
+        detect_only_path="$2"
+        shift 2
         ;;
       --yolo)
         yolo_mode=true
@@ -1862,6 +1943,14 @@ main() {
         ;;
     esac
   done
+
+  # --detect mode: non-interactively print detected strategy and exit
+  if [[ -n "$detect_only_path" ]]; then
+    local detected_strategy
+    detected_strategy=$(detect_best_strategy "$detect_only_path") || true
+    [[ -n "$detected_strategy" ]] && echo "$detected_strategy"
+    exit 0
+  fi
 
   # Normal mode: pass through to native claude
   if [[ "$yolo_mode" == false ]]; then

@@ -48,6 +48,27 @@ detect() {
   echo "$output" | grep '^CONFIDENCE:' | cut -d: -f2
 }
 
+# Run full auto-detection (including deep scan fallback) against a fixture.
+# Returns the detected strategy name, or empty string if nothing detected.
+# Exercises the real claude-yolo --detect code path.
+auto_detect() {
+  local fixture="$1"
+  local fixture_path="$FIXTURES_DIR/$fixture"
+  "$REPO_DIR/bin/claude-yolo" --detect "$fixture_path" 2>/dev/null || true
+}
+
+# Assert that auto-detection returns a specific strategy name
+assert_strategy() {
+  local description="$1" expected="$2" actual="$3"
+  if [[ "$actual" == "$expected" ]]; then
+    pass "$description (detected: $actual)"
+  elif [[ -z "$actual" ]]; then
+    fail "$description (expected '$expected', got nothing)"
+  else
+    fail "$description (expected '$expected', got '$actual')"
+  fi
+}
+
 # Assert confidence is at or above a threshold
 assert_high() {
   local description="$1" confidence="$2" threshold="${3:-80}"
@@ -164,6 +185,20 @@ assert_low "Python rejects Node project" "$conf" 1
 
 conf=$(detect python empty)
 assert_low "Python rejects empty dir" "$conf" 1
+
+########################################
+# Deep scan — nested environments
+########################################
+
+section "Rails — nested one directory deep"
+
+# Shallow scan of the root should find nothing (files are in a subdirectory)
+conf=$(detect rails rails-nested)
+assert_low "Rails shallow scan finds nothing at root of nested project" "$conf" 1
+
+# Full auto-detection (with deep scan fallback) should find Rails in the subdirectory
+strategy=$(auto_detect rails-nested)
+assert_strategy "Auto-detect finds Rails in nested directory structure" "rails" "$strategy"
 
 ########################################
 # Summary
