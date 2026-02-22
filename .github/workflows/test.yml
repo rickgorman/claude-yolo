@@ -40,8 +40,8 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Run test suite
-        run: ./test/test-cli.sh
+      - name: Run unit test suite
+        run: ./test/run-unit-tests.sh
 
   docker-build-rails:
     name: Docker Build (rails)
