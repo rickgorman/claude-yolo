@@ -16,8 +16,8 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - name: Lint bin/claude-yolo
-        run: shellcheck -x -S warning -e SC1090 bin/claude-yolo
+      - name: Lint bin/claude-yolo-bash
+        run: shellcheck -x -S warning -e SC1090 bin/claude-yolo-bash
 
       - name: Lint scripts/start-chrome.sh
         run: shellcheck -x -S warning -e SC1090 scripts/start-chrome.sh
