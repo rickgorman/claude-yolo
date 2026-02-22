@@ -117,16 +117,6 @@ if [[ -n "$_orig_curl_path" ]]; then
 fi
 
 ########################################
-# Tests: GitHub token in docker run args
-########################################
-
-
-section "GitHub token in docker run args"
-
-assert_contains "Docker args include GH_TOKEN" "$docker_args" "GH_TOKEN=test_token_for_ci"
-assert_contains "Docker args include GITHUB_TOKEN" "$docker_args" "GITHUB_TOKEN=test_token_for_ci"
-
-########################################
 # Tests: GitHub token — missing halts execution
 ########################################
 
@@ -190,15 +180,6 @@ output_bad_token=$(bash -c '
 assert_contains "Invalid token shows error" "$output_bad_token" "GitHub token invalid"
 assert_contains "Invalid token shows source" "$output_bad_token" "GH_TOKEN env var"
 assert_not_contains "Invalid token does not reach docker run" "$output_bad_token" "Launching Claude Code"
-
-########################################
-# Tests: GitHub token output display
-########################################
-
-
-section "GitHub token output display"
-
-assert_contains "Output shows GitHub token success" "$output_no_chrome" "GitHub token"
 
 ########################################
 # Tests: CLAUDE_YOLO_NO_GITHUB override

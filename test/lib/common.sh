@@ -126,6 +126,10 @@ EOF
 EMPTY_DIR="$TMPDIR_BASE/empty-project"
 mkdir -p "$EMPTY_DIR"
 
+# Empty home (for testing missing config scenarios)
+EMPTY_HOME="$TMPDIR_BASE/empty-home"
+mkdir -p "$EMPTY_HOME"
+
 ########################################
 # Source CLI functions, then override
 ########################################
