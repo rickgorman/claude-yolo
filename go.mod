@@ -1,6 +1,6 @@
 module github.com/rickgorman/claude-yolo
 
-go 1.24.0
+go 1.22
 
 require (
 	github.com/docker/docker v27.4.1+incompatible
