@@ -778,6 +778,122 @@ check_yolo_config() {
 }
 
 ########################################
+# Git user config extraction
+########################################
+
+extract_git_user_config() {
+  # Extract user.name and user.email from host .gitconfig and any included files
+  # Returns: user.name=<name>\nuser.email=<email> (or partial if only one found)
+
+  local gitconfig="${HOME}/.gitconfig"
+  local user_name=""
+  local user_email=""
+
+  if [[ ! -f "$gitconfig" ]]; then
+    return 0
+  fi
+
+  # Process gitconfig and any included files
+  local -a config_files=("$gitconfig")
+  local processed_count=0
+  local max_depth=10  # Prevent infinite include loops
+
+  while [[ ${#config_files[@]} -gt 0 && $processed_count -lt $max_depth ]]; do
+    local current_file="${config_files[0]}"
+    config_files=("${config_files[@]:1}")  # Remove first element
+    processed_count=$((processed_count + 1))
+
+    if [[ ! -f "$current_file" ]]; then
+      continue
+    fi
+
+    # Extract user.name if not already found
+    if [[ -z "$user_name" ]]; then
+      user_name=$(git config -f "$current_file" user.name 2>/dev/null || true)
+    fi
+
+    # Extract user.email if not already found
+    if [[ -z "$user_email" ]]; then
+      user_email=$(git config -f "$current_file" user.email 2>/dev/null || true)
+    fi
+
+    # Find and queue included files
+    while IFS= read -r include_path; do
+      # Expand ~ to HOME
+      include_path="${include_path/#\~/$HOME}"
+      if [[ -f "$include_path" ]]; then
+        config_files+=("$include_path")
+      fi
+    done < <(git config -f "$current_file" --get-all include.path 2>/dev/null || true)
+  done
+
+  # Output results
+  [[ -n "$user_name" ]] && echo "user.name=$user_name"
+  [[ -n "$user_email" ]] && echo "user.email=$user_email"
+}
+
+prompt_git_user_config() {
+  # Prompt user for missing git config values
+  # Args: $1 = user_name (may be empty), $2 = user_email (may be empty)
+  # Returns: user.name=<name>\nuser.email=<email>
+
+  local user_name="$1"
+  local user_email="$2"
+
+  echo "" >&2
+  warn "Git user configuration needed for commits"
+  echo "" >&2
+
+  if [[ -z "$user_name" ]]; then
+    read -r -p "  Enter your name: " user_name >&2
+  fi
+
+  if [[ -z "$user_email" ]]; then
+    read -r -p "  Enter your email: " user_email >&2
+  fi
+
+  echo "user.name=$user_name"
+  echo "user.email=$user_email"
+}
+
+setup_container_gitconfig() {
+  # Create a minimal .gitconfig in the container with user.name and user.email
+  # Prompts user if values are missing
+
+  local config_output
+  config_output=$(extract_git_user_config)
+
+  local user_name=""
+  local user_email=""
+
+  # Parse extracted config
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+      user_name="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+      user_email="${BASH_REMATCH[1]}"
+    fi
+  done <<< "$config_output"
+
+  # Prompt for missing values
+  if [[ -z "$user_name" || -z "$user_email" ]]; then
+    local prompted
+    prompted=$(prompt_git_user_config "$user_name" "$user_email")
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+        user_name="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+        user_email="${BASH_REMATCH[1]}"
+      fi
+    done <<< "$prompted"
+  fi
+
+  # Return the config to be written by the caller
+  echo "user.name=$user_name"
+  echo "user.email=$user_email"
+}
+
+########################################
 # Ruby version detection (for Rails)
 ########################################
 
@@ -1546,10 +1662,16 @@ run_with_strategy() {
     done < "${worktree_path}/.yolo/env"
   fi
 
-  # Mount git config read-only
-  if [[ -f "${HOME}/.gitconfig" ]]; then
-    docker_args+=(-v "${HOME}/.gitconfig:/home/claude/.gitconfig:ro")
-  fi
+  # Extract git user config and pass as environment variables
+  local git_user_config
+  git_user_config=$(setup_container_gitconfig)
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+      docker_args+=(-e "GIT_USER_NAME=${BASH_REMATCH[1]}")
+    elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+      docker_args+=(-e "GIT_USER_EMAIL=${BASH_REMATCH[1]}")
+    fi
+  done <<< "$git_user_config"
 
   # Mount host CLAUDE.md read-only
   if [[ -f "${HOME}/.claude/CLAUDE.md" ]]; then

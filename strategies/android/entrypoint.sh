@@ -8,6 +8,15 @@ log() {
   echo "[entrypoint:android] $*" >&2
 }
 
+# Create minimal .gitconfig from environment variables
+if [[ -n "${GIT_USER_NAME:-}" || -n "${GIT_USER_EMAIL:-}" ]]; then
+  cat > /home/claude/.gitconfig << EOF
+[user]
+	name = ${GIT_USER_NAME}
+	email = ${GIT_USER_EMAIL}
+EOF
+fi
+
 log "Java: $(java -version 2>&1 | head -1)"
 log "Android SDK: $ANDROID_HOME"
 log "ADB: $(adb version | head -1)"
