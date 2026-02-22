@@ -3464,6 +3464,61 @@ assert_contains "Bad hash + keep: attaches to existing container" "$output_ports
 assert_not_contains "Bad hash + keep: does not recreate container" "$output_ports_bad_keep" "recreating"
 
 ########################################
+# Fixture: ports hash — no hash yet (ports file exists but predates hash feature)
+########################################
+
+PORTS_NO_HASH_DIR="$TMPDIR_BASE/rails-ports-no-hash"
+mkdir -p "$PORTS_NO_HASH_DIR/config" "$PORTS_NO_HASH_DIR/bin" "$PORTS_NO_HASH_DIR/.yolo"
+echo "gem 'rails'" > "$PORTS_NO_HASH_DIR/Gemfile"
+echo "# app" > "$PORTS_NO_HASH_DIR/config/application.rb"
+echo "3.3.0" > "$PORTS_NO_HASH_DIR/.ruby-version"
+echo "#!/bin/bash" > "$PORTS_NO_HASH_DIR/bin/rails"
+cat > "$PORTS_NO_HASH_DIR/.yolo/ports" << 'EOF'
+3011:3000
+5177:5173
+EOF
+
+########################################
+# Tests: ports hash detection — no stored hash yet
+########################################
+
+section "ports hash detection — no hash yet (first attach)"
+
+_no_hash_path=$(cd "$PORTS_NO_HASH_DIR" && pwd)
+_no_hash_id=$(path_hash "$_no_hash_path")
+
+output_ports_no_hash=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps)
+        if [[ "$*" == *"status=exited"* ]]; then
+          echo ""
+        else
+          echo "claude-yolo-'"$_no_hash_id"'-rails"
+        fi
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f docker
+  cd "'"$PORTS_NO_HASH_DIR"'"
+  bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_not_contains "No hash yet: no port-changed warning" "$output_ports_no_hash" "Port mappings changed"
+assert_contains "No hash yet: attaches to running container" "$output_ports_no_hash" "Attaching"
+
+_written_hash=$(get_ports_stored_hash "$PORTS_NO_HASH_DIR/.yolo/ports")
+_expected_hash=$(ports_file_content_hash "$PORTS_NO_HASH_DIR/.yolo/ports")
+assert_eq "No hash yet: hash written to ports file on attach" "$_expected_hash" "$_written_hash"
+
+########################################
 # Summary
 ########################################
 

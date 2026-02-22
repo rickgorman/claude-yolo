@@ -2050,6 +2050,8 @@ main() {
             running=""
             ;;
         esac
+      elif [[ -z "$stored_ports_hash" ]]; then
+        update_ports_stored_hash "$ports_file" "$current_ports_hash"
       fi
     fi
     if [[ -n "$running" ]]; then
