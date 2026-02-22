@@ -56,14 +56,22 @@ for test_file in "${TEST_FILES[@]}"; do
 
   if output=$("$test_path" 2>&1); then
     # Parse results from output
-    passed=$(echo "$output" | grep "Passed:" | awk '{print $2}')
+    passed=$(echo "$output" | grep "Passed:" | tail -1 | awk '{print $2}')
+    failed=$(echo "$output" | grep "Failed:" | tail -1 | awk '{print $2}')
     echo "$output" | tail -6
     TOTAL_PASSED=$((TOTAL_PASSED + passed))
-  else
-    # Test suite failed
-    echo "$output" | tail -15
-    failed=$(echo "$output" | grep "Failed:" | awk '{print $2}')
     TOTAL_FAILED=$((TOTAL_FAILED + failed))
+  else
+    # Test suite failed - but still count the tests that passed before crash
+    echo "$output" | tail -15
+    passed=$(echo "$output" | grep "Passed:" | tail -1 | awk '{print $2}')
+    failed=$(echo "$output" | grep "Failed:" | tail -1 | awk '{print $2}')
+    if [[ -n "$passed" ]]; then
+      TOTAL_PASSED=$((TOTAL_PASSED + passed))
+    fi
+    if [[ -n "$failed" ]]; then
+      TOTAL_FAILED=$((TOTAL_FAILED + failed))
+    fi
     FAILED_SUITES+=("$test_file")
   fi
 

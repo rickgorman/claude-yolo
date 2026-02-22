@@ -225,3 +225,19 @@ print_summary() {
   echo "  All tests passed!"
   return 0
 }
+
+# Cleanup function for docker-created files
+cleanup_tmpdir() {
+  if [[ -d "$TMPDIR_BASE" ]]; then
+    # Try normal removal first
+    rm -rf "$TMPDIR_BASE" 2>/dev/null || {
+      # If that fails (permission denied), use sudo
+      if command -v sudo >/dev/null 2>&1; then
+        sudo rm -rf "$TMPDIR_BASE" 2>/dev/null || true
+      fi
+    }
+  fi
+}
+
+# Set trap to cleanup on exit
+trap cleanup_tmpdir EXIT
