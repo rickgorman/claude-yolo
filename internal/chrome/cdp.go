@@ -20,7 +20,7 @@ func IsAvailable(port int) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK
 }
@@ -115,10 +115,10 @@ func WriteMCPConfig(cdpHost string, cdpPort int, existingConfigPath string) (str
 	if err != nil {
 		return "", err
 	}
-	defer tmpfile.Close()
+	defer func() { _ = tmpfile.Close() }()
 
 	if _, err := tmpfile.Write(data); err != nil {
-		os.Remove(tmpfile.Name())
+		_ = os.Remove(tmpfile.Name())
 		return "", err
 	}
 

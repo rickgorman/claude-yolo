@@ -30,47 +30,47 @@ var (
 // Header prints the top border with "claude·yolo" branding.
 func Header() {
 	border := strings.Repeat("─", BoxWidth-14)
-	fmt.Fprintf(Out, "  %s┌%s %sclaude·yolo%s %s%s\n",
+	_, _ = fmt.Fprintf(Out, "  %s┌%s %sclaude·yolo%s %s%s\n",
 		Dim(""), Dim(""), Bold(""), Dim(""), Dim(border), Dim(""))
 }
 
 // Footer prints the bottom border.
 func Footer() {
 	border := strings.Repeat("─", BoxWidth-1)
-	fmt.Fprintf(Out, "  %s└%s%s\n", Dim(""), Dim(border), Dim(""))
+	_, _ = fmt.Fprintf(Out, "  %s└%s%s\n", Dim(""), Dim(border), Dim(""))
 }
 
 // Info prints an informational message with a cyan arrow.
 func Info(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(Out, "  %s→%s %s\n", Cyan(""), Dim(""), msg)
+	_, _ = fmt.Fprintf(Out, "  %s→%s %s\n", Cyan(""), Dim(""), msg)
 }
 
 // Success prints a success message with a green checkmark.
 func Success(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(Out, "  %s✔%s %s\n", Green(""), Dim(""), msg)
+	_, _ = fmt.Fprintf(Out, "  %s✔%s %s\n", Green(""), Dim(""), msg)
 }
 
 // Fail prints an error message with a red X.
 func Fail(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(Out, "  %s✘%s %s\n", Red(""), Dim(""), msg)
+	_, _ = fmt.Fprintf(Out, "  %s✘%s %s\n", Red(""), Dim(""), msg)
 }
 
 // Warn prints a warning message with a yellow circle.
 func Warn(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(Out, "  %s○%s %s\n", Yellow(""), Dim(""), msg)
+	_, _ = fmt.Fprintf(Out, "  %s○%s %s\n", Yellow(""), Dim(""), msg)
 }
 
 // Dim prints a dimmed message.
 func DimMsg(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(Out, "  %s\n", Dim(msg))
+	_, _ = fmt.Fprintf(Out, "  %s\n", Dim(msg))
 }
 
 // BlankLine prints a blank line to stderr.
 func BlankLine() {
-	fmt.Fprintln(Out, "")
+	_, _ = fmt.Fprintln(Out, "")
 }

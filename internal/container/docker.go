@@ -63,7 +63,7 @@ func (c *Client) BuildImage(ctx context.Context, buildContext io.Reader, opts ty
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Stream build output to stdout
 	_, err = io.Copy(io.Discard, resp.Body)

@@ -66,7 +66,7 @@ func migrateSessionsInDir(baseDir string) error {
 			if hasFiles {
 				ui.Warn("Cannot migrate yolo session %s: worktree path unknown", hash)
 			} else {
-				os.RemoveAll(sessionDir)
+				_ = os.RemoveAll(sessionDir)
 			}
 			continue
 		}
@@ -74,7 +74,7 @@ func migrateSessionsInDir(baseDir string) error {
 		// Migrate files
 		encodedPath := strings.ReplaceAll(worktreePath, "/", "-")
 		targetDir := filepath.Join(homeDir, ".claude", "projects", encodedPath)
-		os.MkdirAll(targetDir, 0755)
+		_ = os.MkdirAll(targetDir, 0755)
 
 		moved := 0
 		files, _ := os.ReadDir(sessionDir)
@@ -93,8 +93,8 @@ func migrateSessionsInDir(baseDir string) error {
 		}
 
 		// Cleanup
-		os.Remove(filepath.Join(sessionDir, ".worktree-path"))
-		os.Remove(sessionDir)
+		_ = os.Remove(filepath.Join(sessionDir, ".worktree-path"))
+		_ = os.Remove(sessionDir)
 	}
 
 	return nil

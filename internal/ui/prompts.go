@@ -12,9 +12,9 @@ import (
 // Returns true for yes (Y/y/empty), false for no (N/n).
 func AskYesNo(prompt string, defaultYes bool) bool {
 	if defaultYes {
-		fmt.Fprintf(Out, "  %s [Y/n] ", prompt)
+		_, _ = fmt.Fprintf(Out, "  %s [Y/n] ", prompt)
 	} else {
-		fmt.Fprintf(Out, "  %s [y/N] ", prompt)
+		_, _ = fmt.Fprintf(Out, "  %s [y/N] ", prompt)
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -32,9 +32,9 @@ func AskYesNo(prompt string, defaultYes bool) bool {
 // Returns the selected index (0-based) or -1 for invalid choice.
 func AskChoice(prompt string, defaultChoice int, maxChoice int) int {
 	if defaultChoice > 0 {
-		fmt.Fprintf(Out, "  %s [1-%d]: ", prompt, maxChoice)
+		_, _ = fmt.Fprintf(Out, "  %s [1-%d]: ", prompt, maxChoice)
 	} else {
-		fmt.Fprintf(Out, "  %s: ", prompt)
+		_, _ = fmt.Fprintf(Out, "  %s: ", prompt)
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -55,7 +55,7 @@ func AskChoice(prompt string, defaultChoice int, maxChoice int) int {
 
 // AskString prompts the user for a string input.
 func AskString(prompt string) string {
-	fmt.Fprintf(Out, "  %s: ", prompt)
+	_, _ = fmt.Fprintf(Out, "  %s: ", prompt)
 
 	reader := bufio.NewReader(os.Stdin)
 	response, _ := reader.ReadString('\n')
@@ -65,7 +65,7 @@ func AskString(prompt string) string {
 // AskViewOrApply prompts whether to view or apply .yolo/ config.
 // Returns: "apply", "view", or "cancel"
 func AskViewOrApply(prompt string) string {
-	fmt.Fprintf(Out, "  %s [Y/n/v(iew)] ", prompt)
+	_, _ = fmt.Fprintf(Out, "  %s [Y/n/v(iew)] ", prompt)
 
 	reader := bufio.NewReader(os.Stdin)
 	response, _ := reader.ReadString('\n')

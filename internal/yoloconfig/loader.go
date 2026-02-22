@@ -84,7 +84,7 @@ func loadEnvFile(path string) (map[string]string, error) {
 	if err != nil {
 		return env, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -123,7 +123,7 @@ func loadPortsFile(path string) ([]string, error) {
 	if err != nil {
 		return ports, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -191,13 +191,13 @@ func trustConfig(configHash string) error {
 	}
 
 	trustFile := filepath.Join(homeDir, ".claude", ".yolo-trusted")
-	os.MkdirAll(filepath.Dir(trustFile), 0755)
+	_ = os.MkdirAll(filepath.Dir(trustFile), 0755)
 
 	file, err := os.OpenFile(trustFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	_, err = fmt.Fprintln(file, configHash)
 	return err

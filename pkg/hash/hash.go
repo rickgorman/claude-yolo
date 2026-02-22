@@ -16,7 +16,7 @@ import (
 func PathHash(path string) string {
 	// Use MD5 for consistency with bash script behavior
 	hasher := md5.New()
-	io.WriteString(hasher, path)
+	_, _ = io.WriteString(hasher, path)
 	fullHash := hex.EncodeToString(hasher.Sum(nil))
 	return fullHash[:8]
 }
@@ -31,7 +31,7 @@ func CDPPortForHash(hash string) int {
 
 	// Convert first 4 hex characters to decimal
 	var dec uint64
-	fmt.Sscanf(hash[:4], "%x", &dec)
+	_, _ = fmt.Sscanf(hash[:4], "%x", &dec)
 
 	// Apply modulo and add to base port
 	return 9222 + int(dec%778)
@@ -40,13 +40,13 @@ func CDPPortForHash(hash string) int {
 // MD5Sum returns the full MD5 hash of a string.
 func MD5Sum(s string) string {
 	hasher := md5.New()
-	io.WriteString(hasher, s)
+	_, _ = io.WriteString(hasher, s)
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 // SHA1Sum returns the full SHA1 hash of a string.
 func SHA1Sum(s string) string {
 	hasher := sha1.New()
-	io.WriteString(hasher, s)
+	_, _ = io.WriteString(hasher, s)
 	return hex.EncodeToString(hasher.Sum(nil))
 }

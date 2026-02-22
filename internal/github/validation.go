@@ -41,7 +41,7 @@ func ValidateToken(token string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == 200, nil
 }
@@ -69,7 +69,7 @@ func CheckScopes(token string) (*ValidationResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	result := &ValidationResult{
 		Valid: resp.StatusCode == 200,

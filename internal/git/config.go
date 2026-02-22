@@ -72,7 +72,7 @@ func ExtractUserConfig() (*UserConfig, error) {
 				}
 			}
 		}
-		file.Close()
+		_ = file.Close()
 	}
 
 	return config, nil
