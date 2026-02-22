@@ -191,9 +191,9 @@ func trustConfig(configHash string) error {
 	}
 
 	trustFile := filepath.Join(homeDir, ".claude", ".yolo-trusted")
-	_ = os.MkdirAll(filepath.Dir(trustFile), 0755)
+	_ = os.MkdirAll(filepath.Dir(trustFile), 0700)
 
-	file, err := os.OpenFile(trustFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(trustFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
