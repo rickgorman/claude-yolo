@@ -1,0 +1,2279 @@
+#!/usr/bin/env bash
+#
+# claude-yolo: Run Claude Code in an isolated Docker container with --dangerously-skip-permissions
+#
+# Usage:
+#   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
+#              [--env KEY=VALUE]... [--env-file <path>]...
+#              [--trust-github-token] [--trust-yolo] [--reset]
+#              [--setup-token]
+#              [-p <prompt>] [claude args...]
+#
+# Flags:
+#   --yolo              Run in Docker container with full permission bypass
+#   --strategy <name>   Skip auto-detection, use specified strategy (rails, android, ...)
+#   --build             Force rebuild the Docker image before running
+#   --verbose           Show raw Docker build output instead of spinner
+#   --chrome            Enable Chrome DevTools MCP server for browser control
+#   --env KEY=VALUE     Inject env var into the container (repeatable)
+#   --env-file <path>   Inject env vars from a dotenv-style file (repeatable)
+#   --trust-github-token  Skip broad-scope GitHub token warnings
+#   --trust-yolo        Skip .yolo/ directory trust prompt
+#   --reset             Remove existing container and recreate from image
+#   --setup-token       Run Claude OAuth setup and save credentials to .yolo/
+#   -p, --print         Run Claude in headless print mode (non-interactive)
+#
+# Without --yolo, passes through to the native claude command.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+STRATEGIES_DIR="$REPO_DIR/strategies"
+
+# Stale image threshold (days)
+STALE_IMAGE_DAYS=14
+
+# .yolo/ config state (set by check_yolo_config)
+YOLO_CONFIG_LOADED=false
+PROJECT_IMAGE_NAME=""
+
+########################################
+# Color / glyph system
+########################################
+
+if [[ -t 2 ]]; then
+  BOLD='\033[1m' DIM='\033[2m' RESET='\033[0m'
+  GREEN='\033[32m' CYAN='\033[36m' YELLOW='\033[33m' RED='\033[31m'
+else
+  BOLD='' DIM='' RESET='' GREEN='' CYAN='' YELLOW='' RED=''
+fi
+
+########################################
+# Output helpers
+########################################
+
+BOX_WIDTH=46
+
+header() {
+  echo -e "  ${DIM}┌${RESET} ${BOLD}claude·yolo${RESET} ${DIM}$(printf '─%.0s' $(seq 1 $((BOX_WIDTH - 14))))${RESET}" >&2
+}
+
+footer() {
+  echo -e "  ${DIM}└$(printf '─%.0s' $(seq 1 $((BOX_WIDTH - 1))))${RESET}" >&2
+}
+
+info() {
+  echo -e "  ${CYAN}→${RESET} $*" >&2
+}
+
+success() {
+  echo -e "  ${GREEN}✔${RESET} $*" >&2
+}
+
+fail() {
+  echo -e "  ${RED}✘${RESET} $*" >&2
+}
+
+warn() {
+  echo -e "  ${YELLOW}○${RESET} $*" >&2
+}
+
+dim() {
+  echo -e "  ${DIM}$*${RESET}" >&2
+}
+
+########################################
+# Git / path helpers
+########################################
+
+get_worktree_path() {
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
+path_hash() {
+  if command -v md5 &>/dev/null; then
+    echo -n "$1" | md5 | cut -c1-8
+  elif command -v md5sum &>/dev/null; then
+    echo -n "$1" | md5sum | cut -c1-8
+  else
+    echo -n "$1" | shasum | cut -c1-8
+  fi
+}
+
+cdp_port_for_hash() {
+  local hash="$1"
+  local dec=$((16#${hash:0:4}))
+  echo $((9222 + dec % 778))
+}
+
+########################################
+# Docker helpers
+########################################
+
+migrate_yolo_sessions() {
+  local base_dir
+  for base_dir in "${HOME}"/.*/yolo-sessions/; do
+    [[ -d "$base_dir" ]] || continue
+
+    local session_dir
+    for session_dir in "${base_dir}"*/; do
+      [[ -d "$session_dir" ]] || continue
+
+      local hash
+      hash=$(basename "$session_dir")
+
+      if docker ps --filter "name=claude-yolo-${hash}" --format '{{.Names}}' 2>/dev/null \
+           | grep -q .; then
+        continue
+      fi
+
+      local worktree_path=""
+      local meta_file="${session_dir}.worktree-path"
+
+      if [[ -f "$meta_file" ]]; then
+        worktree_path=$(cat "$meta_file")
+      else
+        local container_name
+        container_name=$(docker ps -a \
+          --filter "name=claude-yolo-${hash}" \
+          --format '{{.Names}}' 2>/dev/null | head -1)
+
+        if [[ -n "$container_name" ]]; then
+          worktree_path=$(docker inspect "$container_name" \
+            --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' \
+            2>/dev/null || true)
+        fi
+      fi
+
+      if [[ -z "$worktree_path" ]]; then
+        local has_files=false
+        for f in "${session_dir}"*; do
+          [[ -f "$f" ]] && { has_files=true; break; }
+        done
+        if [[ "$has_files" == true ]]; then
+          warn "Cannot migrate yolo session ${hash}: worktree path unknown"
+        else
+          rm -rf "$session_dir" 2>/dev/null || true
+        fi
+        continue
+      fi
+
+      local encoded_path="${worktree_path//\//-}"
+      local target_dir="${HOME}/.claude/projects/${encoded_path}"
+      mkdir -p "$target_dir"
+
+      local moved=0
+      local f
+      for f in "${session_dir}"*; do
+        [[ -f "$f" ]] || continue
+        mv "$f" "$target_dir/"
+        moved=$((moved + 1))
+      done
+
+      if [[ $moved -gt 0 ]]; then
+        info "Migrated ${moved} session file(s) for ${worktree_path}"
+      fi
+
+      rm -f "${session_dir}.worktree-path"
+      rmdir "$session_dir" 2>/dev/null || true
+    done
+  done
+}
+
+check_dependencies() {
+  local missing=()
+
+  command -v docker &>/dev/null || missing+=("docker")
+  command -v git &>/dev/null    || missing+=("git")
+  command -v curl &>/dev/null   || missing+=("curl")
+  command -v tmux &>/dev/null   || missing+=("tmux")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    fail "Missing required dependencies: ${BOLD}${missing[*]}${RESET}"
+    echo "" >&2
+    if [[ "$(uname)" == "Darwin" ]]; then
+      dim "Install with: brew install ${missing[*]}"
+    else
+      dim "Install with: sudo apt-get install ${missing[*]}"
+    fi
+    exit 1
+  fi
+
+  if ! docker info &>/dev/null; then
+    fail "Docker is not running. Start Docker Desktop and try again."
+    exit 1
+  fi
+}
+
+image_exists() {
+  local image="$1"
+  docker image inspect "${image}:latest" &>/dev/null
+}
+
+find_running_container() {
+  local hash="$1"
+  docker ps --format '{{.Names}}' 2>/dev/null | grep "^claude-yolo-${hash}-" | head -1
+}
+
+find_stopped_container() {
+  local hash="$1"
+  docker ps -a --filter "status=exited" --format '{{.Names}}' 2>/dev/null \
+    | grep "^claude-yolo-${hash}-" | head -1
+}
+
+container_uptime() {
+  local name="$1"
+  local started_at
+  started_at=$(docker inspect --format '{{.State.StartedAt}}' "$name" 2>/dev/null) || return 1
+
+  local start_epoch now_epoch
+  local ts
+  ts=$(echo "$started_at" | cut -d. -f1)
+  if date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s &>/dev/null 2>&1; then
+    start_epoch=$(date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s)
+  else
+    start_epoch=$(date -d "$started_at" +%s 2>/dev/null) || return 1
+  fi
+  now_epoch=$(date +%s)
+
+  local diff=$(( now_epoch - start_epoch ))
+  local hours=$(( diff / 3600 ))
+  local minutes=$(( (diff % 3600) / 60 ))
+
+  if [[ $hours -gt 0 ]]; then
+    echo "${hours}h ${minutes}m"
+  else
+    echo "${minutes}m"
+  fi
+}
+
+image_age_days() {
+  local image="$1"
+  local created_at
+  created_at=$(docker inspect --format '{{.Created}}' "${image}:latest" 2>/dev/null) || return 1
+
+  local ts created_epoch now_epoch
+  ts=$(echo "$created_at" | cut -d. -f1)
+  if date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s &>/dev/null 2>&1; then
+    created_epoch=$(date -juf "%Y-%m-%dT%H:%M:%S" "$ts" +%s)
+  else
+    created_epoch=$(date -d "$created_at" +%s 2>/dev/null) || return 1
+  fi
+  now_epoch=$(date +%s)
+
+  echo $(( (now_epoch - created_epoch) / 86400 ))
+}
+
+########################################
+# Port conflict resolution
+########################################
+
+# Global for passing resolved port flags back from resolve_port_conflicts
+_RESOLVED_PORT_FLAGS=()
+
+check_port_in_use() {
+  local port="$1"
+  lsof -i ":${port}" -sTCP:LISTEN &>/dev/null
+}
+
+find_free_port() {
+  local base_port="$1"
+  local candidate
+
+  # Prefer base+1000 (e.g. 3000 → 4000)
+  candidate=$((base_port + 1000))
+  if ! check_port_in_use "$candidate"; then
+    echo "$candidate"
+    return 0
+  fi
+
+  # Fall back to base+1, base+2, ...
+  local offset
+  for offset in $(seq 1 100); do
+    candidate=$((base_port + offset))
+    if ! check_port_in_use "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+resolve_port_conflicts() {
+  local auto_remap="$1"
+  shift
+  local -a input_flags=("$@")
+
+  # Parse host ports and detect conflicts
+  local -a conflict_ports=()
+  local -a conflict_suggestions=()
+  local all_remappable=true
+
+  local i=0
+  while [[ $i -lt ${#input_flags[@]} ]]; do
+    if [[ "${input_flags[$i]}" == "-p" ]]; then
+      local mapping="${input_flags[$((i + 1))]}"
+      local host_port="${mapping%%:*}"
+
+      if check_port_in_use "$host_port"; then
+        conflict_ports+=("$host_port")
+        local suggested
+        suggested=$(find_free_port "$host_port") || { all_remappable=false; suggested=""; }
+        conflict_suggestions+=("$suggested")
+      fi
+      i=$((i + 2))
+    else
+      i=$((i + 1))
+    fi
+  done
+
+  # No conflicts — pass through unchanged
+  if [[ ${#conflict_ports[@]} -eq 0 ]]; then
+    _RESOLVED_PORT_FLAGS=("${input_flags[@]}")
+    return 0
+  fi
+
+  # Display conflicts
+  echo "" >&2
+  warn "Port conflict detected"
+  local idx
+  for idx in "${!conflict_ports[@]}"; do
+    local cp="${conflict_ports[$idx]}"
+    local proc_pid
+    proc_pid=$(lsof -i ":${cp}" -sTCP:LISTEN -t 2>/dev/null | head -1)
+    local proc_name=""
+    if [[ -n "$proc_pid" ]]; then
+      proc_name=$(ps -p "$proc_pid" -o comm= 2>/dev/null || true)
+    fi
+    if [[ -n "$proc_name" ]]; then
+      dim "  Port ${cp} in use by ${proc_name} (pid ${proc_pid})"
+    else
+      dim "  Port ${cp} is already in use"
+    fi
+  done
+  echo "" >&2
+
+  local do_remap=false
+
+  if [[ "$auto_remap" == true ]]; then
+    # Headless mode: auto-remap without prompting
+    if [[ "$all_remappable" == true ]]; then
+      do_remap=true
+      for idx in "${!conflict_ports[@]}"; do
+        info "Auto-remapped ${conflict_ports[$idx]} → ${conflict_suggestions[$idx]}"
+      done
+    else
+      fail "Cannot auto-remap all conflicting ports"
+      _RESOLVED_PORT_FLAGS=("${input_flags[@]}")
+      return 1
+    fi
+  else
+    # Interactive prompt
+    if [[ "$all_remappable" == true ]]; then
+      dim "  Suggested remapping:"
+      for idx in "${!conflict_ports[@]}"; do
+        dim "    ${conflict_ports[$idx]} → ${conflict_suggestions[$idx]}"
+      done
+      echo "" >&2
+      echo -e "    ${BOLD}1${RESET}  Remap to suggested ports" >&2
+      echo -e "    ${BOLD}2${RESET}  Continue anyway (docker may fail)" >&2
+      echo "" >&2
+
+      local choice
+      read -p "  Press ENTER to remap, or select [1-2]: " choice >&2
+
+      case "$choice" in
+        ""|1)
+          do_remap=true
+          for idx in "${!conflict_ports[@]}"; do
+            success "Remapped ${conflict_ports[$idx]} → ${conflict_suggestions[$idx]}"
+          done
+          ;;
+        *)
+          warn "Continuing with conflicting ports"
+          ;;
+      esac
+    else
+      warn "Could not find free alternatives for all ports"
+      dim "  Docker may fail to start with these port conflicts."
+    fi
+  fi
+
+  # Apply remapping or pass through
+  if [[ "$do_remap" == true ]]; then
+    local -a new_flags=()
+    i=0
+    while [[ $i -lt ${#input_flags[@]} ]]; do
+      if [[ "${input_flags[$i]}" == "-p" ]]; then
+        local mapping="${input_flags[$((i + 1))]}"
+        local host_port="${mapping%%:*}"
+        local container_port="${mapping#*:}"
+        local remapped=false
+
+        local cidx
+        for cidx in "${!conflict_ports[@]}"; do
+          if [[ "$host_port" == "${conflict_ports[$cidx]}" ]]; then
+            new_flags+=(-p "${conflict_suggestions[$cidx]}:${container_port}")
+            remapped=true
+            break
+          fi
+        done
+
+        if [[ "$remapped" == false ]]; then
+          new_flags+=(-p "$mapping")
+        fi
+        i=$((i + 2))
+      else
+        new_flags+=("${input_flags[$i]}")
+        i=$((i + 1))
+      fi
+    done
+    _RESOLVED_PORT_FLAGS=("${new_flags[@]}")
+  else
+    _RESOLVED_PORT_FLAGS=("${input_flags[@]}")
+  fi
+}
+
+########################################
+# .yolo/ports change detection
+########################################
+
+ports_file_content_hash() {
+  local ports_file="$1"
+  local content
+  content=$(grep -Ev '^\s*(#|$)' "$ports_file" 2>/dev/null || true)
+  if [[ -z "$content" ]]; then
+    echo "empty"
+    return 0
+  fi
+  if command -v md5 &>/dev/null; then
+    printf '%s' "$content" | md5 | cut -c1-16
+  elif command -v md5sum &>/dev/null; then
+    printf '%s' "$content" | md5sum | cut -c1-16
+  else
+    printf '%s' "$content" | shasum | cut -c1-16
+  fi
+}
+
+get_ports_stored_hash() {
+  local ports_file="$1"
+  grep '^# _yolo_hash:' "$ports_file" 2>/dev/null | head -1 | sed 's/^# _yolo_hash:[[:space:]]*//' || true
+}
+
+update_ports_stored_hash() {
+  local ports_file="$1"
+  local new_hash="$2"
+  local tmp
+  tmp=$(mktemp)
+  # Remove old hash comment and WARNING comment if present
+  grep -Ev '^# (_yolo_hash|WARNING):' "$ports_file" > "$tmp" || true
+  # Add hash with warning at top of file
+  {
+    echo "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"
+    echo "# _yolo_hash: ${new_hash}"
+    cat "$tmp"
+  } > "$ports_file"
+  rm -f "$tmp"
+}
+
+generate_ports_file() {
+  local ports_file="$1"
+  shift
+  local port_flags=("$@")
+
+  {
+    echo "# Port mappings: host_port:container_port"
+    echo "#   host_port      — port exposed on your Mac (what you connect to)"
+    echo "#   container_port — port the process listens on inside the Docker container"
+    for flag in "${port_flags[@]}"; do
+      [[ "$flag" == "-p" ]] && continue
+      echo "$flag"
+    done
+  } > "$ports_file"
+}
+
+########################################
+# Chrome CDP (used by multiple strategies)
+########################################
+
+cdp_available() {
+  local port="${1:-9222}"
+  curl -s --connect-timeout 1 "http://localhost:${port}/json/version" &>/dev/null
+}
+
+ensure_chrome() {
+  local port="${1:-9222}"
+
+  if cdp_available "$port"; then
+    return 0
+  fi
+
+  CDP_PORT="$port" "$REPO_DIR/scripts/start-chrome.sh" || {
+    fail "Failed to start Chrome"
+    exit 1
+  }
+
+  local attempts=0
+  while ! cdp_available "$port" && [[ $attempts -lt 20 ]]; do
+    sleep 0.5
+    attempts=$((attempts + 1))
+  done
+
+  if ! cdp_available "$port"; then
+    fail "Chrome CDP not available after startup attempt"
+    exit 1
+  fi
+}
+
+########################################
+# GitHub token detection & validation
+########################################
+
+_GITHUB_TOKEN=""
+_GITHUB_TOKEN_SOURCE=""
+
+parse_env_file() {
+  local file="$1"
+  local key line token
+  for key in GH_TOKEN GITHUB_TOKEN; do
+    line=$(grep -E "^(export )?${key}=" "$file" 2>/dev/null | head -1 || true)
+    if [[ -n "$line" ]]; then
+      token=$(echo "$line" | sed -E "s/^(export )?${key}=//; s/^['\"]//; s/['\"]$//" | tr -d '[:space:]')
+      if [[ -n "$token" ]]; then
+        echo "$token"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+find_github_token() {
+  local worktree_path="$1"
+
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    _GITHUB_TOKEN="$GH_TOKEN"
+    _GITHUB_TOKEN_SOURCE="GH_TOKEN env var"
+    return 0
+  fi
+
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    _GITHUB_TOKEN="$GITHUB_TOKEN"
+    _GITHUB_TOKEN_SOURCE="GITHUB_TOKEN env var"
+    return 0
+  fi
+
+  local token=""
+
+  if [[ -f "${worktree_path}/.env" ]]; then
+    token=$(parse_env_file "${worktree_path}/.env") || true
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="${worktree_path}/.env"
+      return 0
+    fi
+  fi
+
+  if [[ -f "${HOME}/.env" ]]; then
+    token=$(parse_env_file "${HOME}/.env") || true
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="$HOME/.env"
+      return 0
+    fi
+  fi
+
+  local gh_config="${XDG_CONFIG_HOME:-$HOME/.config}/gh/hosts.yml"
+  if [[ -f "$gh_config" ]]; then
+    token=$(grep 'oauth_token:' "$gh_config" 2>/dev/null | head -1 | sed 's/.*oauth_token:[[:space:]]*//' | tr -d '[:space:]' || true)
+    if [[ -n "$token" ]]; then
+      _GITHUB_TOKEN="$token"
+      _GITHUB_TOKEN_SOURCE="$gh_config"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+validate_github_token() {
+  local token="$1"
+  local http_code
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 10 \
+    -H "Authorization: token $token" \
+    https://api.github.com/user 2>/dev/null) || return 1
+  [[ "$http_code" == "200" ]]
+}
+
+# Broad scopes that are dangerous to hand to an unsupervised AI
+BROAD_TOKEN_SCOPES="delete_repo admin:org admin:enterprise admin:gpg_key admin:public_key admin:ssh_signing_key"
+
+check_github_token_scopes() {
+  local token="$1"
+  local headers
+  headers=$(curl -sI --connect-timeout 5 --max-time 10 \
+    -H "Authorization: token $token" \
+    https://api.github.com/user 2>/dev/null) || return 0
+
+  local scopes_header
+  scopes_header=$(echo "$headers" | grep -i '^x-oauth-scopes:' | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r' || true)
+
+  # Fine-grained tokens have no X-OAuth-Scopes header — they're safe by design
+  if [[ -z "$scopes_header" ]]; then
+    return 0
+  fi
+
+  _GITHUB_TOKEN_SCOPES="$scopes_header"
+
+  local found_broad=()
+  for scope in $BROAD_TOKEN_SCOPES; do
+    if echo ",$scopes_header," | grep -qi ",${scope}," 2>/dev/null || \
+       echo ", $scopes_header," | grep -qi ", ${scope}," 2>/dev/null || \
+       echo "$scopes_header" | grep -qi "\\b${scope}\\b" 2>/dev/null; then
+      found_broad+=("$scope")
+    fi
+  done
+
+  if [[ ${#found_broad[@]} -gt 0 ]]; then
+    _BROAD_SCOPES="${found_broad[*]}"
+    return 1
+  fi
+
+  return 0
+}
+
+_GITHUB_TOKEN_SCOPES=""
+_BROAD_SCOPES=""
+
+ensure_github_token() {
+  local worktree_path="$1"
+
+  if [[ -n "${CLAUDE_YOLO_NO_GITHUB:-}" ]]; then
+    dim "GitHub token check skipped (CLAUDE_YOLO_NO_GITHUB)"
+    return 0
+  fi
+
+  if ! find_github_token "$worktree_path"; then
+    fail "GitHub token not found"
+    echo "" >&2
+    dim "Searched:"
+    dim "  • GH_TOKEN environment variable"
+    dim "  • GITHUB_TOKEN environment variable"
+    dim "  • ${worktree_path}/.env"
+    dim "  • ~/.env"
+    dim "  • ~/.config/gh/hosts.yml"
+    echo "" >&2
+    dim "Set one with:"
+    dim "  export GH_TOKEN=ghp_your_token_here"
+    echo "" >&2
+    dim "Or skip this check entirely:"
+    dim "  export CLAUDE_YOLO_NO_GITHUB=1"
+    exit 1
+  fi
+
+  if ! validate_github_token "$_GITHUB_TOKEN"; then
+    fail "GitHub token invalid (${_GITHUB_TOKEN_SOURCE})"
+    dim "Verify: GH_TOKEN=\$GH_TOKEN gh auth status"
+    exit 1
+  fi
+
+  if ! check_github_token_scopes "$_GITHUB_TOKEN"; then
+    warn "GitHub token has broad scopes: ${BOLD}${_BROAD_SCOPES}${RESET}"
+    dim "These scopes give the AI access to dangerous operations."
+    dim "Token source: ${_GITHUB_TOKEN_SOURCE}"
+    echo "" >&2
+    if [[ "$trust_github_token" == true ]]; then
+      dim "Proceeding (--trust-github-token)"
+    else
+      fail "Refusing to proceed with broad-scope token"
+      dim "To accept the risk, re-run with:"
+      dim "  cc --yolo --trust-github-token"
+      exit 1
+    fi
+  fi
+
+  success "GitHub token ${DIM}(${_GITHUB_TOKEN_SOURCE})${RESET}"
+}
+
+########################################
+# .yolo/ project config
+########################################
+
+check_yolo_config() {
+  local worktree_path="$1"
+  local trust_yolo="${2:-false}"
+  local yolo_dir="${worktree_path}/.yolo"
+
+  if [[ ! -d "$yolo_dir" ]]; then
+    return 0
+  fi
+
+  # Compute combined hash of all .yolo/ files
+  local combined=""
+  for f in "$yolo_dir"/*; do
+    [[ -f "$f" ]] || continue
+    combined+="$(cat "$f")"
+  done
+
+  local config_hash
+  if command -v md5 &>/dev/null; then
+    config_hash=$(echo -n "$combined" | md5 | cut -c1-16)
+  elif command -v md5sum &>/dev/null; then
+    config_hash=$(echo -n "$combined" | md5sum | cut -c1-16)
+  else
+    config_hash=$(echo -n "$combined" | shasum | cut -c1-16)
+  fi
+
+  local trust_file="${HOME}/.claude/.yolo-trusted"
+
+  # --trust-yolo bypasses prompt
+  if [[ "$trust_yolo" == true ]]; then
+    mkdir -p "$(dirname "$trust_file")"
+    echo "$config_hash" >> "$trust_file"
+    YOLO_CONFIG_LOADED=true
+    success ".yolo/ config trusted (--trust-yolo)"
+    return 0
+  fi
+
+  # Check if already trusted
+  if [[ -f "$trust_file" ]] && grep -qF "$config_hash" "$trust_file" 2>/dev/null; then
+    YOLO_CONFIG_LOADED=true
+    success ".yolo/ config loaded"
+    return 0
+  fi
+
+  # Prompt user
+  echo "" >&2
+  warn "This project has a ${BOLD}.yolo/${RESET} configuration directory"
+  dim "Files:"
+  for f in "$yolo_dir"/*; do
+    [[ -f "$f" ]] && dim "  $(basename "$f")"
+  done
+  echo "" >&2
+
+  local answer
+  read -p "  Apply .yolo/ config? [Y/n/v(iew)] " answer >&2
+
+  case "$answer" in
+    n|N)
+      return 0
+      ;;
+    v|V)
+      for f in "$yolo_dir"/*; do
+        [[ -f "$f" ]] || continue
+        echo "" >&2
+        echo -e "  ${DIM}── $(basename "$f") ──${RESET}" >&2
+        sed 's/^/    /' "$f" >&2
+      done
+      echo "" >&2
+      read -p "  Apply .yolo/ config? [Y/n] " answer >&2
+      if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+        return 0
+      fi
+      ;;
+  esac
+
+  # Trust it
+  mkdir -p "$(dirname "$trust_file")"
+  echo "$config_hash" >> "$trust_file"
+  YOLO_CONFIG_LOADED=true
+  success ".yolo/ config loaded"
+}
+
+########################################
+# Git user config extraction
+########################################
+
+extract_git_user_config() {
+  # Extract user.name and user.email from host .gitconfig and any included files
+  # Returns: user.name=<name>\nuser.email=<email> (or partial if only one found)
+
+  local gitconfig="${HOME}/.gitconfig"
+  local user_name=""
+  local user_email=""
+
+  if [[ ! -f "$gitconfig" ]]; then
+    return 0
+  fi
+
+  # Process gitconfig and any included files
+  local -a config_files=("$gitconfig")
+  local processed_count=0
+  local max_depth=10  # Prevent infinite include loops
+
+  while [[ ${#config_files[@]} -gt 0 && $processed_count -lt $max_depth ]]; do
+    local current_file="${config_files[0]}"
+    config_files=("${config_files[@]:1}")  # Remove first element
+    processed_count=$((processed_count + 1))
+
+    if [[ ! -f "$current_file" ]]; then
+      continue
+    fi
+
+    # Extract user.name if not already found
+    if [[ -z "$user_name" ]]; then
+      user_name=$(git config -f "$current_file" user.name 2>/dev/null || true)
+    fi
+
+    # Extract user.email if not already found
+    if [[ -z "$user_email" ]]; then
+      user_email=$(git config -f "$current_file" user.email 2>/dev/null || true)
+    fi
+
+    # Find and queue included files
+    while IFS= read -r include_path; do
+      # Expand ~ to HOME
+      include_path="${include_path/#\~/$HOME}"
+      if [[ -f "$include_path" ]]; then
+        config_files+=("$include_path")
+      fi
+    done < <(git config -f "$current_file" --get-all include.path 2>/dev/null || true)
+  done
+
+  # Output results
+  [[ -n "$user_name" ]] && echo "user.name=$user_name"
+  [[ -n "$user_email" ]] && echo "user.email=$user_email"
+}
+
+prompt_git_user_config() {
+  # Prompt user for missing git config values
+  # Args: $1 = user_name (may be empty), $2 = user_email (may be empty)
+  # Returns: user.name=<name>\nuser.email=<email>
+
+  local user_name="$1"
+  local user_email="$2"
+
+  # Skip prompting in non-interactive mode
+  if [[ ! -t 0 ]]; then
+    [[ -n "$user_name" ]] && echo "user.name=$user_name"
+    [[ -n "$user_email" ]] && echo "user.email=$user_email"
+    return 0
+  fi
+
+  echo "" >&2
+  warn "Git user configuration needed for commits"
+  echo "" >&2
+
+  if [[ -z "$user_name" ]]; then
+    read -r -p "  Enter your name: " user_name >&2
+  fi
+
+  if [[ -z "$user_email" ]]; then
+    read -r -p "  Enter your email: " user_email >&2
+  fi
+
+  echo "user.name=$user_name"
+  echo "user.email=$user_email"
+}
+
+setup_container_gitconfig() {
+  # Create a minimal .gitconfig in the container with user.name and user.email
+  # Prompts user if values are missing
+
+  local config_output
+  config_output=$(extract_git_user_config)
+
+  local user_name=""
+  local user_email=""
+
+  # Parse extracted config
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+      user_name="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+      user_email="${BASH_REMATCH[1]}"
+    fi
+  done <<< "$config_output"
+
+  # Prompt for missing values
+  if [[ -z "$user_name" || -z "$user_email" ]]; then
+    local prompted
+    prompted=$(prompt_git_user_config "$user_name" "$user_email")
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+        user_name="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+        user_email="${BASH_REMATCH[1]}"
+      fi
+    done <<< "$prompted"
+  fi
+
+  # Return the config to be written by the caller
+  echo "user.name=$user_name"
+  echo "user.email=$user_email"
+}
+
+########################################
+# Ruby version detection (for Rails)
+########################################
+
+detect_ruby_version() {
+  local worktree_path="$1"
+
+  if [[ -f "${worktree_path}/.ruby-version" ]]; then
+    cat "${worktree_path}/.ruby-version" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.tool-versions" ]]; then
+    local ver
+    ver=$(grep -E "^(local )?ruby " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $NF}' | head -1)
+    if [[ -n "$ver" ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  if [[ -f "${worktree_path}/Gemfile" ]]; then
+    local ver
+    ver=$(grep -E "^ruby ['\"]" "${worktree_path}/Gemfile" 2>/dev/null | \
+      sed -E "s/ruby ['\"]([^'\"]+)['\"].*/\1/" | head -1)
+    if [[ -n "$ver" ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  echo "4.0.1"
+}
+
+detect_python_version() {
+  local worktree_path="$1"
+
+  if [[ -f "${worktree_path}/.python-version" ]]; then
+    cat "${worktree_path}/.python-version" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.tool-versions" ]]; then
+    local ver
+    ver=$(grep "^python " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $2}' | head -1)
+    if [[ -n "$ver" ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  if [[ -f "${worktree_path}/pyproject.toml" ]]; then
+    local ver
+    ver=$(grep -E '^requires-python' "${worktree_path}/pyproject.toml" 2>/dev/null | \
+      sed -E 's/.*>=[[:space:]]*"?([0-9]+\.[0-9]+).*/\1/' | head -1)
+    if [[ -n "$ver" && "$ver" != *"requires"* ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  echo "3.12"
+}
+
+detect_node_version() {
+  local worktree_path="$1"
+
+  if [[ -f "${worktree_path}/.nvmrc" ]]; then
+    cat "${worktree_path}/.nvmrc" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.node-version" ]]; then
+    cat "${worktree_path}/.node-version" | tr -d '[:space:]'
+    return 0
+  fi
+
+  if [[ -f "${worktree_path}/.tool-versions" ]]; then
+    local ver
+    ver=$(grep "^nodejs " "${worktree_path}/.tool-versions" 2>/dev/null | awk '{print $2}' | head -1)
+    if [[ -n "$ver" ]]; then
+      echo "$ver"
+      return 0
+    fi
+  fi
+
+  echo "20"
+}
+
+########################################
+# Environment detection
+########################################
+
+list_strategies() {
+  for dir in "$STRATEGIES_DIR"/*/; do
+    if [[ -f "${dir}detect.sh" ]]; then
+      basename "$dir"
+    fi
+  done
+}
+
+run_detection() {
+  local worktree_path="$1"
+  local results=()
+
+  for strategy in $(list_strategies); do
+    local output
+    output=$("$STRATEGIES_DIR/$strategy/detect.sh" "$worktree_path" 2>/dev/null) || continue
+    local confidence evidence
+    confidence=$(echo "$output" | grep '^CONFIDENCE:' | cut -d: -f2 || true)
+    evidence=$(echo "$output" | grep '^EVIDENCE:' | cut -d: -f2- || true)
+
+    if [[ "${confidence:-0}" -gt 0 ]]; then
+      results+=("${confidence}:${strategy}:${evidence}")
+    fi
+  done
+
+  if [[ ${#results[@]} -gt 0 ]]; then
+    printf '%s\n' "${results[@]}" | sort -t: -k1 -rn
+  fi
+}
+
+# Scan immediate subdirectories for strategy matches.
+# Skips hidden dirs and common non-project directories.
+# Returns sorted detection results (same format as run_detection).
+run_detection_deep() {
+  local worktree_path="$1"
+  local all_results=()
+  local skip_dirs=("node_modules" "vendor" "tmp" "log" "public" ".bundle")
+
+  for subdir in "$worktree_path"/*/; do
+    [[ -d "$subdir" ]] || continue
+
+    local dirname
+    dirname=$(basename "$subdir")
+
+    [[ "$dirname" == .* ]] && continue
+
+    local skip=false
+    for skip_dir in "${skip_dirs[@]}"; do
+      [[ "$dirname" == "$skip_dir" ]] && { skip=true; break; }
+    done
+    $skip && continue
+
+    local sub_results
+    sub_results=$(run_detection "$subdir") || true
+
+    if [[ -n "$sub_results" ]]; then
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && all_results+=("$line")
+      done <<< "$sub_results"
+    fi
+  done
+
+  if [[ ${#all_results[@]} -gt 0 ]]; then
+    printf '%s\n' "${all_results[@]}" | sort -t: -k1 -rn
+  fi
+}
+
+# Non-interactively pick the best strategy for a directory.
+# Tries shallow detection first; falls back to deep scan if nothing found.
+detect_best_strategy() {
+  local worktree_path="$1"
+  local detections
+
+  detections=$(run_detection "$worktree_path")
+
+  if [[ -z "$detections" ]]; then
+    detections=$(run_detection_deep "$worktree_path")
+  fi
+
+  if [[ -n "$detections" ]]; then
+    echo "$detections" | head -1 | cut -d: -f2
+    return 0
+  fi
+
+  return 1
+}
+
+choose_strategy() {
+  local worktree_path="$1"
+  local detections
+  detections=$(run_detection "$worktree_path")
+
+  if [[ -n "$detections" ]]; then
+    local count
+    count=$(echo "$detections" | wc -l | tr -d ' ')
+    local top_confidence top_strategy top_evidence
+    top_confidence=$(echo "$detections" | head -1 | cut -d: -f1)
+    top_strategy=$(echo "$detections" | head -1 | cut -d: -f2)
+    top_evidence=$(echo "$detections" | head -1 | cut -d: -f3-)
+
+    if [[ "$count" -eq 1 && "$top_confidence" -ge 80 ]]; then
+      echo -e "  ${GREEN}●${RESET} Detected: ${BOLD}${top_strategy}${RESET} (${top_confidence}%)" >&2
+      dim "  ${top_evidence}"
+      echo "$top_strategy"
+      return 0
+    fi
+
+    echo "" >&2
+    echo -e "  Detected:" >&2
+    local i=1
+    while IFS=: read -r confidence strategy evidence; do
+      local glyph color
+      if [[ "$confidence" -ge 80 ]]; then
+        glyph="●"
+        color="$GREEN"
+      else
+        glyph="○"
+        color="${DIM}${YELLOW}"
+      fi
+      printf "    ${BOLD}%d${RESET}  ${color}${glyph}${RESET} %-10s ${DIM}%3s%%${RESET}   ${DIM}%s${RESET}\n" \
+        "$i" "$strategy" "$confidence" "$evidence" >&2
+      ((i++))
+    done <<< "$detections"
+    printf "    ${BOLD}%d${RESET}  ○ %-10s        ${DIM}%s${RESET}\n" \
+      "$i" "other" "see all supported / generate new" >&2
+    echo "" >&2
+
+    local choice
+    read -p "  Press ENTER for ${top_strategy}, or select [1-${i}]: " choice >&2
+
+    if [[ -z "$choice" ]]; then
+      echo "$top_strategy"
+      return 0
+    fi
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 || "$choice" -gt "$i" ]]; then
+      fail "Invalid selection: $choice"
+      exit 1
+    fi
+
+    if [[ "$choice" -eq "$i" ]]; then
+      choose_from_full_list "$worktree_path"
+      return $?
+    fi
+
+    echo "$detections" | sed -n "${choice}p" | cut -d: -f2
+    return 0
+  fi
+
+  # Nothing found at root — scan immediate subdirectories before giving up
+  local deep_detections
+  deep_detections=$(run_detection_deep "$worktree_path")
+
+  if [[ -n "$deep_detections" ]]; then
+    local top_confidence top_strategy top_evidence
+    top_confidence=$(echo "$deep_detections" | head -1 | cut -d: -f1)
+    top_strategy=$(echo "$deep_detections"   | head -1 | cut -d: -f2)
+    top_evidence=$(echo "$deep_detections"   | head -1 | cut -d: -f3-)
+
+    if [[ "$top_confidence" -ge 80 ]]; then
+      echo -e "  ${GREEN}●${RESET} Detected: ${BOLD}${top_strategy}${RESET} (${top_confidence}%, nested)" >&2
+      dim "  ${top_evidence}"
+      echo "$top_strategy"
+      return 0
+    fi
+  fi
+
+  choose_from_full_list "$worktree_path"
+}
+
+choose_from_full_list() {
+  local worktree_path="$1"
+  local strategies=()
+
+  echo "" >&2
+  warn "No environment auto-detected"
+  echo "" >&2
+  echo -e "  Select an environment:" >&2
+  local i=1
+  for strategy in $(list_strategies); do
+    strategies+=("$strategy")
+    local desc=""
+    if [[ -f "$STRATEGIES_DIR/$strategy/description" ]]; then
+      desc=$(cat "$STRATEGIES_DIR/$strategy/description" | tr -d '\n')
+    fi
+    printf "    ${BOLD}%d${RESET}  %-12s ${DIM}%s${RESET}\n" "$i" "$strategy" "$desc" >&2
+    ((i++))
+  done
+  printf "    ${BOLD}%d${RESET}  %-12s ${DIM}%s${RESET}\n" "$i" "other" "generate prompt for new strategy" >&2
+  echo "" >&2
+
+  local choice
+  read -p "  ▸ " choice >&2
+
+  if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 || "$choice" -gt "$i" ]]; then
+    fail "Invalid selection: $choice"
+    exit 1
+  fi
+
+  if [[ "$choice" -eq "$i" ]]; then
+    generate_unknown_prompt "$worktree_path"
+    echo "__unknown__"
+    return 0
+  fi
+
+  echo "${strategies[$((choice - 1))]}"
+}
+
+generate_unknown_prompt() {
+  local worktree_path="$1"
+
+  local notable_files
+  notable_files=$(cd "$worktree_path" && find . -maxdepth 3 \
+    -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o \
+    -name "*.toml" -o -name "*.lock" -o -name "*.cfg" -o \
+    -name "Makefile" -o -name "Dockerfile" -o -name "*.gemspec" -o \
+    -name "*.csproj" -o -name "*.sln" -o -name "*.cabal" -o \
+    -name "go.mod" -o -name "go.sum" -o \
+    -name "Cargo.toml" -o -name "Cargo.lock" -o \
+    -name "requirements.txt" -o -name "pyproject.toml" -o -name "setup.py" -o \
+    -name "pom.xml" -o -name "build.gradle" -o -name "build.gradle.kts" -o \
+    -name "mix.exs" -o -name "pubspec.yaml" -o -name "Package.swift" -o \
+    -name "CMakeLists.txt" -o -name "Gemfile" -o \
+    -name "package.json" -o -name "tsconfig.json" -o \
+    -name "composer.json" -o -name "*.pro" -o \
+    -name ".ruby-version" -o -name ".node-version" -o \
+    -name ".python-version" -o -name ".tool-versions" \
+    2>/dev/null | sort | head -40)
+
+  echo "" >&2
+  echo -e "  ${DIM}┌─${RESET} Copy this into Claude ${DIM}$(printf '─%.0s' $(seq 1 $((BOX_WIDTH - 25))))┐${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}  I need you to create a new environment strategy for claude-yolo" >&2
+  echo -e "  ${DIM}│${RESET}  (located at $REPO_DIR)." >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}  The project at \"$worktree_path\" contains these notable files:" >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  while IFS= read -r f; do
+    echo -e "  ${DIM}│${RESET}    $f" >&2
+  done <<< "$notable_files"
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}  Look at the existing strategies in strategies/rails/ and" >&2
+  echo -e "  ${DIM}│${RESET}  strategies/android/ as reference. Each strategy needs 3 files:" >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}  1. strategies/<name>/detect.sh" >&2
+  echo -e "  ${DIM}│${RESET}  2. strategies/<name>/Dockerfile" >&2
+  echo -e "  ${DIM}│${RESET}  3. strategies/<name>/entrypoint.sh" >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}  Optional: strategies/<name>/platform" >&2
+  echo -e "  ${DIM}│${RESET}  Optional: strategies/<name>/description (one-line summary)" >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}│${RESET}  Read the existing strategies first, then create the new one." >&2
+  echo -e "  ${DIM}│${RESET}" >&2
+  echo -e "  ${DIM}└$(printf '─%.0s' $(seq 1 $((BOX_WIDTH - 1))))┘${RESET}" >&2
+}
+
+########################################
+# Image building
+########################################
+
+build_strategy_image() {
+  local strategy="$1"
+  local verbose="${2:-false}"
+  local strategy_dir="$STRATEGIES_DIR/$strategy"
+  local image_name="claude-yolo-${strategy}"
+
+  [[ -d "$strategy_dir" ]] || { fail "Strategy not found: $strategy"; exit 1; }
+  [[ -f "$strategy_dir/Dockerfile" ]] || { fail "No Dockerfile for strategy: $strategy"; exit 1; }
+
+  local platform=""
+  if [[ -f "$strategy_dir/platform" ]]; then
+    platform=$(cat "$strategy_dir/platform" | tr -d '[:space:]')
+  fi
+
+  local -a build_cmd=(docker build)
+  if [[ -n "$platform" ]]; then
+    build_cmd+=(--platform "$platform")
+  fi
+  build_cmd+=(-t "${image_name}:latest" -f "${strategy_dir}/Dockerfile" "$strategy_dir")
+
+  info "Building ${BOLD}${image_name}${RESET} (first run, may take a few minutes)"
+
+  if [[ "$verbose" == true ]]; then
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" || { fail "Build failed"; exit 1; }
+  else
+    local logfile
+    logfile=$(mktemp /tmp/claude-yolo-build-XXXXXX)
+
+    local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local build_start
+    build_start=$(date +%s)
+    local build_pid
+
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" >"$logfile" 2>&1 &
+    build_pid=$!
+
+    while kill -0 "$build_pid" 2>/dev/null; do
+      local elapsed=$(( $(date +%s) - build_start ))
+      local idx=$(( elapsed % ${#spinner_chars} ))
+      local char="${spinner_chars:$idx:1}"
+      printf "\r  ${CYAN}%s${RESET} Building... ${DIM}%ds${RESET}  " "$char" "$elapsed" >&2
+      sleep 0.2
+    done
+
+    local exit_code=0
+    wait "$build_pid" || exit_code=$?
+    printf "\r%*s\r" 40 "" >&2
+
+    if [[ $exit_code -ne 0 ]]; then
+      echo "" >&2
+      fail "Build failed (see output below)"
+      echo "" >&2
+      cat "$logfile" >&2
+      rm -f "$logfile"
+      exit 1
+    fi
+
+    local total=$(( $(date +%s) - build_start ))
+    rm -f "$logfile"
+    success "Image ready (${total}s)"
+  fi
+}
+
+build_project_image() {
+  local worktree_path="$1"
+  local hash="$2"
+  local strategy="$3"
+  local verbose="${4:-false}"
+  local yolo_dir="${worktree_path}/.yolo"
+  local image_name="claude-yolo-${hash}"
+
+  # Ensure strategy base image exists
+  if ! image_exists "claude-yolo-${strategy}"; then
+    build_strategy_image "$strategy" "$verbose"
+  fi
+
+  # Compute Dockerfile content hash for change detection
+  local dockerfile_hash
+  if command -v md5 &>/dev/null; then
+    dockerfile_hash=$(md5 -q "$yolo_dir/Dockerfile")
+  elif command -v md5sum &>/dev/null; then
+    dockerfile_hash=$(md5sum "$yolo_dir/Dockerfile" | cut -d' ' -f1)
+  else
+    dockerfile_hash=$(shasum "$yolo_dir/Dockerfile" | cut -d' ' -f1)
+  fi
+
+  # Check if rebuild is needed
+  if image_exists "$image_name" && [[ "$force_build" != true ]]; then
+    local stored_hash
+    stored_hash=$(docker inspect --format '{{index .Config.Labels "yolo.dockerfile.hash"}}' "${image_name}:latest" 2>/dev/null || true)
+    if [[ "$dockerfile_hash" == "$stored_hash" ]]; then
+      return 0
+    fi
+    info "Detected .yolo/Dockerfile change, rebuilding project image"
+  fi
+
+  local -a build_cmd=(docker build)
+  build_cmd+=(
+    --label "yolo.dockerfile.hash=${dockerfile_hash}"
+    -t "${image_name}:latest"
+    -f "$yolo_dir/Dockerfile"
+    "$yolo_dir"
+  )
+
+  info "Building project image ${BOLD}${image_name}${RESET}"
+
+  if [[ "$verbose" == true ]]; then
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" || { fail "Project image build failed"; exit 1; }
+  else
+    local logfile
+    logfile=$(mktemp /tmp/claude-yolo-build-XXXXXX)
+
+    local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local build_start
+    build_start=$(date +%s)
+    local build_pid
+
+    DOCKER_BUILDKIT=1 "${build_cmd[@]}" >"$logfile" 2>&1 &
+    build_pid=$!
+
+    while kill -0 "$build_pid" 2>/dev/null; do
+      local elapsed=$(( $(date +%s) - build_start ))
+      local idx=$(( elapsed % ${#spinner_chars} ))
+      local char="${spinner_chars:$idx:1}"
+      printf "\r  ${CYAN}%s${RESET} Building project image... ${DIM}%ds${RESET}  " "$char" "$elapsed" >&2
+      sleep 0.2
+    done
+
+    local exit_code=0
+    wait "$build_pid" || exit_code=$?
+    printf "\r%*s\r" 50 "" >&2
+
+    if [[ $exit_code -ne 0 ]]; then
+      echo "" >&2
+      fail "Project image build failed (see output below)"
+      echo "" >&2
+      cat "$logfile" >&2
+      rm -f "$logfile"
+      exit 1
+    fi
+
+    local total=$(( $(date +%s) - build_start ))
+    rm -f "$logfile"
+    success "Project image ready (${total}s)"
+  fi
+}
+
+########################################
+# Claude OAuth token setup
+########################################
+
+run_setup_token() {
+  if ! command -v claude &>/dev/null; then
+    fail "Claude Code is not installed. Install it first: https://code.claude.com"
+    return 1
+  fi
+
+  info "Running ${BOLD}claude setup-token${RESET} in a tmux session"
+  echo "" >&2
+  dim "This will open a browser-based OAuth flow."
+  dim "Follow the prompts to authenticate your Claude account."
+  dim "The tmux session will close automatically when done."
+  echo "" >&2
+
+  local session="claude-yolo-setup-$$"
+  local logfile
+  logfile=$(mktemp)
+  local creds_file="${HOME}/.claude/.credentials.json"
+
+  # Record credentials mtime so we can detect if claude wrote new ones
+  local creds_mtime_before=""
+  if [[ -f "$creds_file" ]]; then
+    creds_mtime_before=$(stat -f %m "$creds_file" 2>/dev/null || stat -c %Y "$creds_file" 2>/dev/null || true)
+  fi
+
+  # Kill any stale session with the same name
+  tmux kill-session -t "$session" 2>/dev/null || true
+
+  # Start a tmux session that runs setup-token then exits
+  # Unset CLAUDECODE to avoid nested-session detection if invoked from within Claude Code
+  tmux new-session -d -s "$session" -x 120 -y 40 \
+    "unset CLAUDECODE; claude setup-token; sleep 2; exit"
+
+  # Pipe all pane output to logfile for token capture
+  tmux pipe-pane -t "$session" -o "cat >> '$logfile'"
+
+  # Attach user so they can see the OAuth flow
+  tmux attach-session -t "$session" 2>/dev/null || true
+
+  # If user detached early, wait for session to finish
+  while tmux has-session -t "$session" 2>/dev/null; do
+    sleep 1
+  done
+
+  # Check if claude updated the credentials file directly
+  local creds_mtime_after=""
+  if [[ -f "$creds_file" ]]; then
+    creds_mtime_after=$(stat -f %m "$creds_file" 2>/dev/null || stat -c %Y "$creds_file" 2>/dev/null || true)
+  fi
+  local claude_wrote_creds=false
+  if [[ -n "$creds_mtime_after" && "$creds_mtime_before" != "$creds_mtime_after" ]]; then
+    claude_wrote_creds=true
+  fi
+
+  # Extract token from captured output (starts with sk-ant-)
+  local token
+  token=$(grep -o 'sk-ant-[a-zA-Z0-9_-]*' "$logfile" | head -1)
+  rm -f "$logfile"
+
+  # Save captured token only if claude didn't already write credentials
+  # (preserves refreshToken and other fields when claude handles it)
+  if [[ "$claude_wrote_creds" == false && -n "$token" ]]; then
+    mkdir -p "${HOME}/.claude"
+    printf '{"claudeAiOauth":{"accessToken":"%s"}}' "$token" > "$creds_file"
+  fi
+
+  if [[ -f "${HOME}/.claude/.credentials.json" ]]; then
+    success "Credentials saved to ~/.claude/.credentials.json"
+  else
+    fail "No credentials file was created"
+    dim "The setup-token process may not have completed successfully."
+    return 1
+  fi
+}
+
+########################################
+# Container execution
+########################################
+
+run_with_strategy() {
+  local strategy="$1"
+  local container_name="$2"
+  local verbose="$3"
+  shift 3
+  local claude_args=("$@")
+
+  local worktree_path
+  worktree_path=$(get_worktree_path)
+  local hash
+  hash=$(path_hash "$worktree_path")
+  local cdp_port
+  cdp_port=$(cdp_port_for_hash "$hash")
+  local image_name="claude-yolo-${strategy}"
+  if [[ -n "${PROJECT_IMAGE_NAME:-}" ]]; then
+    image_name="$PROJECT_IMAGE_NAME"
+  fi
+
+  # Ensure image exists
+  if ! image_exists "$image_name"; then
+    if [[ -n "${PROJECT_IMAGE_NAME:-}" ]]; then
+      build_project_image "$worktree_path" "$hash" "$strategy" "$verbose"
+    else
+      build_strategy_image "$strategy" "$verbose"
+    fi
+  fi
+
+  # Stale image warning
+  local age
+  age=$(image_age_days "$image_name" 2>/dev/null) || age=0
+  if [[ "$age" -gt "$STALE_IMAGE_DAYS" ]]; then
+    warn "Image built ${age} days ago — run ${BOLD}cc --yolo --build${RESET} to update"
+  fi
+
+  # Platform for docker run
+  local platform=""
+  if [[ -f "$STRATEGIES_DIR/$strategy/platform" ]]; then
+    platform=$(cat "$STRATEGIES_DIR/$strategy/platform" | tr -d '[:space:]')
+  fi
+
+  # Common volumes
+  local node_volume="claude-yolo-${hash}-node"
+
+  # Ensure host .claude directory exists for bind mount
+  mkdir -p "${HOME}/.claude"
+
+  # Build the docker run command
+  # Use -it for interactive, just -i for piped stdin, neither for headless -p mode
+  local -a tty_flags=(-it)
+  if [[ "$headless_mode" == true ]]; then
+    tty_flags=()
+  elif ! [[ -t 0 ]]; then
+    tty_flags=(-i)
+  fi
+
+  # Collect port mappings: strategy defaults + .yolo/ports overrides
+  local -a port_flags=()
+
+  # On macOS, --network=host doesn't expose container ports to the host.
+  # Publish ports explicitly so services are reachable from the host browser.
+  if [[ "$(uname)" == "Darwin" ]]; then
+    # Strategy-specific default ports
+    case "$strategy" in
+      rails)  port_flags+=(-p 3000:3000 -p 5173:5173) ;;
+      node)   port_flags+=(-p 3000:3000 -p 5173:5173) ;;
+      python) port_flags+=(-p 8000:8000) ;;
+      go)     port_flags+=(-p 8080:8080) ;;
+      *)      ;;
+    esac
+
+    # .yolo/ports overrides (one port or host:container pair per line)
+    if [[ "${YOLO_CONFIG_LOADED}" == true && -f "${worktree_path}/.yolo/ports" ]]; then
+      port_flags=()  # reset defaults — project specifies its own
+      while IFS= read -r line; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        line=$(echo "$line" | tr -d '[:space:]')
+        if [[ "$line" == *:* ]]; then
+          port_flags+=(-p "$line")
+        else
+          port_flags+=(-p "${line}:${line}")
+        fi
+      done < "${worktree_path}/.yolo/ports"
+    fi
+  fi
+
+  # Resolve port conflicts on macOS before launching
+  if [[ ${#port_flags[@]} -gt 0 ]]; then
+    resolve_port_conflicts "$headless_mode" "${port_flags[@]}"
+    port_flags=("${_RESOLVED_PORT_FLAGS[@]}")
+  fi
+
+  # --network=host and -p are mutually exclusive; on macOS we need -p
+  local -a network_flags=(--network=host)
+  if [[ ${#port_flags[@]} -gt 0 ]]; then
+    network_flags=()
+  fi
+
+  # When not using --network=host, localhost inside the container won't reach the
+  # host. Use host.docker.internal so the MCP server can connect to Chrome on
+  # the host.
+  local cdp_host="localhost"
+  if [[ ${#network_flags[@]} -eq 0 ]]; then
+    cdp_host="host.docker.internal"
+  fi
+
+  # Isolate Claude sessions per project — each worktree gets its own
+  # session directory so containers don't resume each other's conversations.
+  # We store directly in the native Claude project dir (same path encoding the
+  # host uses), so sessions are immediately visible to `claude --resume` without
+  # any migration step.
+  local session_dir="${HOME}/.claude/projects/${worktree_path//\//-}"
+  mkdir -p "$session_dir"
+
+  local -a docker_args=(
+    docker run ${tty_flags[@]+"${tty_flags[@]}"}
+    --name "$container_name"
+    ${network_flags[@]+"${network_flags[@]}"}
+    ${port_flags[@]+"${port_flags[@]}"}
+    -v "${worktree_path}:/workspace"
+    -v "${HOME}/.claude:/home/claude/.claude"
+    -v "${session_dir}:/home/claude/.claude/projects/-workspace"
+    -v "${node_volume}:/workspace/node_modules"
+    -e "CHROME_CDP_URL=http://${cdp_host}:${cdp_port}"
+    -e "TERM=${TERM:-xterm-256color}"
+    -e "COLORTERM=${COLORTERM:-}"
+    -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)"
+    -e "LINES=$(tput lines 2>/dev/null || echo 40)"
+    -e "DISABLE_AUTOUPDATER=1"
+    -w /workspace
+  )
+
+  # Claude OAuth: user authenticates inside the container via /login
+
+  # Seed container with a copy of ~/.claude.json to skip onboarding.
+  # Must be a copy, not a bind-mount of the original, because Claude Code
+  # writes back to this file (cache updates, bypass acceptance, etc.) and
+  # concurrent writes through Docker's file-sharing layer corrupt the JSON.
+  if [[ -f "${HOME}/.claude.json" ]]; then
+    local claude_json_copy
+    claude_json_copy=$(mktemp /tmp/claude-yolo-config-XXXXXX)
+    cp "${HOME}/.claude.json" "$claude_json_copy"
+    docker_args+=(-v "${claude_json_copy}:/home/claude/.claude.json")
+  fi
+
+  # GitHub token for gh CLI inside container
+  if [[ -n "$_GITHUB_TOKEN" ]]; then
+    docker_args+=(
+      -e "GH_TOKEN=${_GITHUB_TOKEN}"
+      -e "GITHUB_TOKEN=${_GITHUB_TOKEN}"
+    )
+  fi
+
+  if [[ -n "$platform" ]]; then
+    docker_args+=(--platform "$platform")
+  fi
+
+  # User-specified env vars (--env KEY=VALUE)
+  for env_pair in ${extra_env[@]+"${extra_env[@]}"}; do
+    docker_args+=(-e "$env_pair")
+  done
+
+  # User-specified env files (--env-file PATH)
+  for env_file in ${env_files[@]+"${env_files[@]}"}; do
+    while IFS= read -r line; do
+      # Skip comments and blank lines
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      # Strip optional 'export ' prefix
+      line="${line#export }"
+      # Strip surrounding quotes from value
+      local key="${line%%=*}"
+      local val="${line#*=}"
+      val="${val#\"}" && val="${val%\"}"
+      val="${val#\'}" && val="${val%\'}"
+      docker_args+=(-e "${key}=${val}")
+    done < "$env_file"
+  done
+
+  # .yolo/env injection
+  if [[ "${YOLO_CONFIG_LOADED}" == true && -f "${worktree_path}/.yolo/env" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      line="${line#export }"
+      local key="${line%%=*}"
+      local val="${line#*=}"
+      val="${val#\"}" && val="${val%\"}"
+      val="${val#\'}" && val="${val%\'}"
+      docker_args+=(-e "${key}=${val}")
+    done < "${worktree_path}/.yolo/env"
+  fi
+
+  # Extract git user config and pass as environment variables
+  local git_user_config
+  git_user_config=$(setup_container_gitconfig)
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+      docker_args+=(-e "GIT_USER_NAME=${BASH_REMATCH[1]}")
+    elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+      docker_args+=(-e "GIT_USER_EMAIL=${BASH_REMATCH[1]}")
+    fi
+  done <<< "$git_user_config"
+
+  # Mount host CLAUDE.md read-only
+  if [[ -f "${HOME}/.claude/CLAUDE.md" ]]; then
+    docker_args+=(-v "${HOME}/.claude/CLAUDE.md:/home/claude/.claude/CLAUDE.md:ro")
+  fi
+
+  # Mount host settings read-only, stripping hooks that reference host-only
+  # commands (e.g. afplay, bd) which would fail inside the container.
+  for settings_file in settings.json settings.local.json; do
+    if [[ -f "${HOME}/.claude/${settings_file}" ]]; then
+      if command -v jq &>/dev/null && jq -e '.hooks' "${HOME}/.claude/${settings_file}" &>/dev/null; then
+        local sanitized
+        sanitized=$(mktemp /tmp/claude-yolo-settings-XXXXXX)
+        jq 'del(.hooks)' "${HOME}/.claude/${settings_file}" > "$sanitized"
+        docker_args+=(-v "${sanitized}:/home/claude/.claude/${settings_file}:ro")
+      else
+        docker_args+=(-v "${HOME}/.claude/${settings_file}:/home/claude/.claude/${settings_file}:ro")
+      fi
+    fi
+  done
+
+  # Mount host commands read-only
+  if [[ -d "${HOME}/.claude/commands" ]]; then
+    docker_args+=(-v "${HOME}/.claude/commands:/home/claude/.claude/commands:ro")
+  fi
+
+  # If workspace is a git worktree, mount the parent .git directory
+  # so the gitdir path in the .git file resolves inside the container
+  local git_file="${worktree_path}/.git"
+  if [[ -f "$git_file" ]]; then
+    local gitdir_path
+    gitdir_path=$(sed -n 's/^gitdir: //p' "$git_file")
+    if [[ -n "$gitdir_path" ]]; then
+      local parent_git_dir
+      parent_git_dir=$(cd "$worktree_path" && cd "$(dirname "$gitdir_path")" && cd .. && pwd)
+      docker_args+=(-v "${parent_git_dir}:${parent_git_dir}")
+    fi
+  fi
+
+  # Strategy-specific volumes and env vars
+  local display_worktree="${worktree_path/#$HOME/\~}"
+  case "$strategy" in
+    rails)
+      local ruby_version
+      ruby_version=$(detect_ruby_version "$worktree_path")
+      local gems_volume="claude-yolo-${hash}-gems"
+      local rbenv_volume="claude-yolo-${hash}-rbenv"
+
+      docker_args+=(
+        -v "${gems_volume}:/home/claude/.gems"
+        -v "${rbenv_volume}:/home/claude/.rbenv/versions"
+        -e "RUBY_VERSION=${ruby_version}"
+        -e "DB_HOST=host.docker.internal"
+        -e "DB_USERNAME=postgres"
+        -e "DB_PASSWORD=postgres"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Ruby ${ruby_version} · Postgres"
+      ;;
+
+    android)
+      local gradle_volume="claude-yolo-${hash}-gradle"
+
+      docker_args+=(
+        -v "${gradle_volume}:/home/claude/.gradle"
+        -e "ANDROID_DEVICE=${ANDROID_DEVICE:-}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      if [[ -n "${ANDROID_DEVICE:-}" ]]; then
+        info "Device    ${ANDROID_DEVICE}"
+      else
+        info "Device    ${DIM}set ANDROID_DEVICE=<ip>:<port> to auto-connect${RESET}"
+      fi
+      ;;
+
+    rust)
+      local cargo_volume="claude-yolo-${hash}-cargo"
+      local rustup_volume="claude-yolo-${hash}-rustup"
+      local target_volume="claude-yolo-${hash}-target"
+
+      docker_args+=(
+        -v "${cargo_volume}:/home/claude/.cargo"
+        -v "${rustup_volume}:/home/claude/.rustup"
+        -v "${target_volume}:/workspace/target"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Rust · Cargo"
+      ;;
+
+    python)
+      local python_version
+      python_version=$(detect_python_version "$worktree_path")
+      local pyenv_volume="claude-yolo-${hash}-pyenv"
+
+      docker_args+=(
+        -v "${pyenv_volume}:/home/claude/.pyenv/versions"
+        -e "PYTHON_VERSION=${python_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Python ${python_version} · pip"
+      ;;
+
+    node)
+      local node_version
+      node_version=$(detect_node_version "$worktree_path")
+      local nvm_volume="claude-yolo-${hash}-nvm"
+
+      docker_args+=(
+        -v "${nvm_volume}:/home/claude/.nvm"
+        -e "NODE_VERSION=${node_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Node.js ${node_version} · npm"
+      ;;
+
+    go)
+      local gopath_volume="claude-yolo-${hash}-gopath"
+
+      docker_args+=(
+        -v "${gopath_volume}:/home/claude/go"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Go · modules"
+      ;;
+
+    jekyll)
+      local ruby_version
+      ruby_version=$(detect_ruby_version "$worktree_path")
+      local gems_volume="claude-yolo-${hash}-gems"
+      local rbenv_volume="claude-yolo-${hash}-rbenv"
+
+      docker_args+=(
+        -v "${gems_volume}:/home/claude/.gems"
+        -v "${rbenv_volume}:/home/claude/.rbenv/versions"
+        -e "RUBY_VERSION=${ruby_version}"
+      )
+
+      info "Worktree  ${display_worktree}"
+      info "Jekyll · Ruby ${ruby_version}"
+      ;;
+
+    generic)
+      info "Worktree  ${display_worktree}"
+      info "Generic · no language runtime"
+      ;;
+
+    *)
+      info "Worktree  ${display_worktree}"
+      ;;
+  esac
+
+  # Chrome CDP MCP server
+  if [[ "$chrome_mode" == true ]]; then
+    if ! command -v jq &>/dev/null; then
+      fail "jq is required for --chrome but was not found."
+      echo "" >&2
+      if [[ "$(uname)" == "Darwin" ]]; then
+        dim "Install with: brew install jq"
+      else
+        dim "Install with: sudo apt-get install -y jq"
+      fi
+      exit 1
+    fi
+
+    ensure_chrome "$cdp_port"
+
+    local mcp_config
+    mcp_config=$(mktemp /tmp/claude-yolo-mcp-XXXXXX)
+
+    local chrome_devtools_entry
+    chrome_devtools_entry=$(cat <<CDPJSON
+{"command":"npx","args":["-y","chrome-devtools-mcp@latest","--browser-url=http://${cdp_host}:${cdp_port}"]}
+CDPJSON
+)
+
+    local existing_mcp="${worktree_path}/.mcp.json"
+    if [[ -f "$existing_mcp" ]] && jq empty "$existing_mcp" 2>/dev/null; then
+      jq --argjson entry "$chrome_devtools_entry" \
+        '.mcpServers["chrome-devtools"] = $entry' \
+        "$existing_mcp" > "$mcp_config"
+    else
+      jq -n --argjson entry "$chrome_devtools_entry" \
+        '{"mcpServers":{"chrome-devtools":$entry}}' > "$mcp_config"
+    fi
+
+    docker_args+=(-v "${mcp_config}:/workspace/.mcp.json:ro")
+    info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
+  fi
+
+  # Show published ports
+  if [[ ${#port_flags[@]} -gt 0 ]]; then
+    local ports_display=""
+    for pf in "${port_flags[@]}"; do
+      [[ "$pf" == "-p" ]] && continue
+      ports_display+="${pf} "
+    done
+    if [[ -n "$ports_display" ]]; then
+      info "Ports  ${DIM}${ports_display% }${RESET}"
+    fi
+  fi
+
+  dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
+
+  docker_args+=(
+    "${image_name}:latest"
+    claude --dangerously-skip-permissions
+  )
+
+  # Append any extra claude args
+  if [[ ${#claude_args[@]} -gt 0 ]]; then
+    docker_args+=("${claude_args[@]}")
+  fi
+
+  info "Starting container ${DIM}${container_name}${RESET}"
+  success "Launching Claude Code"
+  footer
+
+  # When Chrome was started, spawn a background cleanup watcher.
+  # It waits for this process to exit, then stops the Chrome instance.
+  if [[ "$chrome_mode" == true ]]; then
+    (
+      # Wait for parent process (which will be replaced by exec) to exit
+      while kill -0 $$ 2>/dev/null; do sleep 1; done
+      CDP_PORT="$cdp_port" "$REPO_DIR/scripts/start-chrome.sh" --stop 2>/dev/null
+    ) &
+    disown
+  fi
+
+  # Auto-generate .yolo/ports with syntax comment when .yolo/ is trusted but no ports file exists
+  local yolo_dir="${worktree_path}/.yolo"
+  if [[ "${YOLO_CONFIG_LOADED:-}" == true && -d "$yolo_dir" && ! -f "${yolo_dir}/ports" && ${#port_flags[@]} -gt 0 ]]; then
+    generate_ports_file "${yolo_dir}/ports" "${port_flags[@]}"
+  fi
+
+  # Record the applied ports hash so future runs can detect changes
+  if [[ -f "${worktree_path}/.yolo/ports" ]]; then
+    local applied_hash
+    applied_hash=$(ports_file_content_hash "${worktree_path}/.yolo/ports")
+    update_ports_stored_hash "${worktree_path}/.yolo/ports" "$applied_hash"
+  fi
+
+  exec "${docker_args[@]}"
+}
+
+attach_to_container() {
+  local container_name="$1"
+  shift
+  local claude_args=("$@")
+
+  local strategy="${container_name##*-}"
+  local uptime
+  uptime=$(container_uptime "$container_name" 2>/dev/null) || uptime="unknown"
+
+  echo -e "  ${CYAN}↩${RESET} Container already running (strategy: ${BOLD}${strategy}${RESET}, up ${DIM}${uptime}${RESET})" >&2
+  dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
+  success "Attaching"
+  footer
+  local -a exec_tty_flags=(-it)
+  if [[ "$headless_mode" == true ]]; then
+    exec_tty_flags=()
+  elif ! [[ -t 0 ]]; then
+    exec_tty_flags=(-i)
+  fi
+
+  exec docker exec ${exec_tty_flags[@]+"${exec_tty_flags[@]}"} \
+    -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)" \
+    -e "LINES=$(tput lines 2>/dev/null || echo 40)" \
+    --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
+}
+
+start_stopped_container() {
+  local container_name="$1"
+  shift
+  local claude_args=("$@")
+
+  local strategy="${container_name##*-}"
+
+  info "Resuming stopped container (strategy: ${BOLD}${strategy}${RESET})"
+  docker start "$container_name" >/dev/null 2>&1 || {
+    warn "Failed to restart container, will create a new one"
+    docker rm -f "$container_name" 2>/dev/null || true
+    return 1
+  }
+
+  # Brief pause to let the container stabilize
+  sleep 0.5
+
+  # Verify container is still running
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
+    warn "Container exited after restart, will create a new one"
+    docker rm -f "$container_name" 2>/dev/null || true
+    return 1
+  fi
+
+  dim "→ Ctrl+C to exit │ cc --yolo to reconnect"
+  success "Attaching"
+  footer
+
+  local -a exec_tty_flags=(-it)
+  if [[ "$headless_mode" == true ]]; then
+    exec_tty_flags=()
+  elif ! [[ -t 0 ]]; then
+    exec_tty_flags=(-i)
+  fi
+
+  exec docker exec ${exec_tty_flags[@]+"${exec_tty_flags[@]}"} \
+    -e "COLUMNS=$(tput cols 2>/dev/null || echo 120)" \
+    -e "LINES=$(tput lines 2>/dev/null || echo 40)" \
+    --user claude "$container_name" claude --dangerously-skip-permissions ${claude_args[@]+"${claude_args[@]}"}
+}
+
+########################################
+# Help
+########################################
+
+show_help() {
+  echo -e "
+  ${BOLD}claude·yolo${RESET} — Run Claude Code in an isolated Docker container
+
+  ${BOLD}Usage:${RESET}
+    claude-yolo --yolo [options] [claude args...]
+    claude-yolo [claude args...]            ${DIM}(pass-through to native claude)${RESET}
+
+  ${BOLD}Container:${RESET}
+    --yolo                   Run in a Docker container with --dangerously-skip-permissions
+    --strategy <name>        Skip auto-detection, use a specific strategy
+                             ${DIM}(rails, python, node, go, android, rust, generic)${RESET}
+    --build                  Force rebuild the Docker image before running
+    --reset                  Remove existing container and recreate from image
+    --verbose                Show Docker build output instead of a spinner
+
+  ${BOLD}Environment:${RESET}
+    --env KEY=VALUE          Inject an env var into the container ${DIM}(repeatable)${RESET}
+    --env-file <path>        Inject env vars from a dotenv-style file ${DIM}(repeatable)${RESET}
+
+  ${BOLD}Security:${RESET}
+    --trust-github-token     Proceed even if the GitHub token has broad scopes
+                             ${DIM}(delete_repo, admin:org, etc.)${RESET}
+    --trust-yolo             Skip .yolo/ directory trust prompt
+
+  ${BOLD}Modes:${RESET}
+    -p, --print              Headless mode — drop TTY, pass -p to Claude
+    --chrome                 Enable Chrome DevTools MCP server for browser control
+
+  ${BOLD}Setup:${RESET}
+    --setup-token            Run Claude OAuth setup and save credentials
+
+  ${BOLD}Info:${RESET}
+    -h, --help               Show this help and exit
+    CLAUDE_YOLO_NO_GITHUB=1  Skip GitHub token detection entirely
+
+  ${DIM}Without --yolo, all arguments are forwarded to the native claude command.${RESET}
+" >&2
+  exit 0
+}
+
+########################################
+# Main
+########################################
+
+main() {
+  local yolo_mode=false
+  local force_build=false
+  local force_strategy=""
+  local verbose=false
+  local chrome_mode=false
+  local headless_mode=false
+  local trust_github_token=false
+  local trust_yolo=false
+  local reset_mode=false
+  local setup_token_mode=false
+  local detect_only_path=""
+  local -a extra_env=()
+  local -a env_files=()
+  local claude_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        show_help
+        ;;
+      --detect)
+        [[ $# -ge 2 ]] || { fail "--detect requires a path argument"; exit 1; }
+        detect_only_path="$2"
+        shift 2
+        ;;
+      --yolo)
+        yolo_mode=true
+        shift
+        ;;
+      --strategy)
+        [[ $# -ge 2 ]] || { fail "--strategy requires an argument"; exit 1; }
+        force_strategy="$2"
+        shift 2
+        ;;
+      --build)
+        force_build=true
+        shift
+        ;;
+      --verbose)
+        verbose=true
+        shift
+        ;;
+      --chrome)
+        chrome_mode=true
+        shift
+        ;;
+      --env)
+        [[ $# -ge 2 ]] || { fail "--env requires a KEY=VALUE argument"; exit 1; }
+        extra_env+=("$2")
+        shift 2
+        ;;
+      --env-file)
+        [[ $# -ge 2 ]] || { fail "--env-file requires a path argument"; exit 1; }
+        [[ -f "$2" ]] || { fail "--env-file: file not found: $2"; exit 1; }
+        env_files+=("$2")
+        shift 2
+        ;;
+      --trust-github-token)
+        trust_github_token=true
+        shift
+        ;;
+      --trust-yolo)
+        trust_yolo=true
+        shift
+        ;;
+      --reset)
+        reset_mode=true
+        shift
+        ;;
+      --setup-token)
+        setup_token_mode=true
+        shift
+        ;;
+      -p|--print)
+        headless_mode=true
+        claude_args+=("$1")
+        shift
+        ;;
+      *)
+        claude_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # --detect mode: non-interactively print detected strategy and exit
+  if [[ -n "$detect_only_path" ]]; then
+    local detected_strategy
+    detected_strategy=$(detect_best_strategy "$detect_only_path") || true
+    [[ -n "$detected_strategy" ]] && echo "$detected_strategy"
+    exit 0
+  fi
+
+  # Normal mode: pass through to native claude
+  if [[ "$yolo_mode" == false ]]; then
+    exec claude ${claude_args[@]+"${claude_args[@]}"}
+  fi
+
+  # YOLO mode
+  check_dependencies
+  header
+
+  local worktree_path
+  worktree_path=$(get_worktree_path)
+  local hash
+  hash=$(path_hash "$worktree_path")
+
+  # --reset: remove existing container(s) and force rebuild
+  if [[ "$reset_mode" == true ]]; then
+    local existing
+    existing=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "^claude-yolo-${hash}-" || true)
+    if [[ -n "$existing" ]]; then
+      echo "$existing" | xargs docker rm -f 2>/dev/null || true
+      info "Removed existing container(s)"
+    fi
+    force_build=true
+  fi
+
+  migrate_yolo_sessions
+
+  # Check for already-running container before running detection
+  local running
+  running=$(find_running_container "$hash" || true)
+  if [[ -n "$running" ]]; then
+    local ports_file="${worktree_path}/.yolo/ports"
+    if [[ -f "$ports_file" ]]; then
+      local current_ports_hash stored_ports_hash
+      current_ports_hash=$(ports_file_content_hash "$ports_file")
+      stored_ports_hash=$(get_ports_stored_hash "$ports_file")
+      if [[ -n "$stored_ports_hash" && "$current_ports_hash" != "$stored_ports_hash" ]]; then
+        echo "" >&2
+        warn "Port mappings changed since container started"
+        echo "" >&2
+        echo -e "    ${BOLD}1${RESET}  Reset container with new ports ${DIM}(default)${RESET}" >&2
+        echo -e "    ${BOLD}2${RESET}  Attach anyway (keep existing mappings)" >&2
+        echo "" >&2
+        local ports_choice
+        read -r -p "  Press ENTER to reset, or select [1-2]: " ports_choice >&2
+        case "$ports_choice" in
+          2)
+            warn "Attaching with existing port mappings"
+            ;;
+          *)
+            docker rm -f "$running" >/dev/null 2>&1 || true
+            info "Container removed — recreating with updated ports"
+            running=""
+            ;;
+        esac
+      elif [[ -z "$stored_ports_hash" ]]; then
+        update_ports_stored_hash "$ports_file" "$current_ports_hash"
+      fi
+    fi
+    if [[ -n "$running" ]]; then
+      attach_to_container "$running" ${claude_args[@]+"${claude_args[@]}"}
+      return $?
+    fi
+  fi
+
+  # Check for stopped container → restart + attach
+  local stopped
+  stopped=$(find_stopped_container "$hash" || true)
+  if [[ -n "$stopped" ]]; then
+    start_stopped_container "$stopped" ${claude_args[@]+"${claude_args[@]}"} || true
+    # If we reach here, restart failed; fall through to create new container
+  fi
+
+  # --setup-token: run interactive OAuth setup, then continue to launch
+  if [[ "$setup_token_mode" == true ]]; then
+    run_setup_token || { footer; exit 1; }
+  fi
+
+  # Note: Claude authentication happens inside the container via /login
+
+  # .yolo/strategy override (before auto-detection)
+  if [[ -z "$force_strategy" && -f "${worktree_path}/.yolo/strategy" ]]; then
+    local yolo_strategy
+    yolo_strategy=$(cat "${worktree_path}/.yolo/strategy" | tr -d '[:space:]')
+    if [[ -n "$yolo_strategy" && -d "$STRATEGIES_DIR/$yolo_strategy" ]]; then
+      force_strategy="$yolo_strategy"
+      info "Using strategy: ${BOLD}${yolo_strategy}${RESET} (.yolo/strategy)"
+    elif [[ -n "$yolo_strategy" ]]; then
+      warn "Unknown strategy in .yolo/strategy: ${yolo_strategy}, ignoring"
+    fi
+  fi
+
+  # Choose strategy
+  local strategy
+  if [[ -n "$force_strategy" ]]; then
+    strategy="$force_strategy"
+    [[ -d "$STRATEGIES_DIR/$strategy" ]] || { fail "Unknown strategy: $strategy"; exit 1; }
+    if [[ -z "${yolo_strategy:-}" ]]; then
+      info "Using strategy: ${BOLD}${strategy}${RESET} (--strategy flag)"
+    fi
+  else
+    strategy=$(choose_strategy "$worktree_path")
+    if [[ "$strategy" == "__unknown__" ]]; then
+      exit 0
+    fi
+    [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
+  fi
+
+  # Ensure GitHub token for gh CLI inside container
+  ensure_github_token "$worktree_path"
+
+  # Check .yolo/ trust + load config
+  check_yolo_config "$worktree_path" "$trust_yolo"
+
+  # Force rebuild if requested
+  if [[ "$force_build" == true ]]; then
+    build_strategy_image "$strategy" "$verbose"
+  fi
+
+  # Build project image if .yolo/Dockerfile exists and config loaded
+  if [[ "${YOLO_CONFIG_LOADED}" == true && -f "${worktree_path}/.yolo/Dockerfile" ]]; then
+    PROJECT_IMAGE_NAME="claude-yolo-${hash}"
+    build_project_image "$worktree_path" "$hash" "$strategy" "$verbose"
+  fi
+
+  local container_name="claude-yolo-${hash}-${strategy}"
+  run_with_strategy "$strategy" "$container_name" "$verbose" ${claude_args[@]+"${claude_args[@]}"}
+}
+
+main "$@"
