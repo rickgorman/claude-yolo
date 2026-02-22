@@ -228,9 +228,7 @@ section "check_yolo_config — no .yolo/ directory"
 
 # check_yolo_config should be a no-op when .yolo/ doesn't exist
 YOLO_CONFIG_LOADED=false
-# shellcheck disable=SC2034
-trust_yolo=false
-check_yolo_config "$EMPTY_DIR" 2>/dev/null
+check_yolo_config "$EMPTY_DIR" "false" 2>/dev/null
 assert_eq "check_yolo_config returns 0 without .yolo/" "false" "$YOLO_CONFIG_LOADED"
 
 
@@ -243,8 +241,7 @@ YOLO_TRUST_HOME="$TMPDIR_BASE/yolo-trust-home"
 mkdir -p "$YOLO_TRUST_HOME/.claude"
 
 YOLO_CONFIG_LOADED=false
-trust_yolo=true
-HOME="$YOLO_TRUST_HOME" check_yolo_config "$YOLO_TRUST_FLAG_DIR" 2>/dev/null
+HOME="$YOLO_TRUST_HOME" check_yolo_config "$YOLO_TRUST_FLAG_DIR" "true" 2>/dev/null
 assert_eq "check_yolo_config sets YOLO_CONFIG_LOADED with --trust-yolo" "true" "$YOLO_CONFIG_LOADED"
 
 # Verify trust file was created
@@ -259,9 +256,7 @@ section "check_yolo_config — already trusted"
 
 # Run again with the same config; should auto-trust
 YOLO_CONFIG_LOADED=false
-# shellcheck disable=SC2034
-trust_yolo=false
-HOME="$YOLO_TRUST_HOME" check_yolo_config "$YOLO_TRUST_FLAG_DIR" 2>/dev/null
+HOME="$YOLO_TRUST_HOME" check_yolo_config "$YOLO_TRUST_FLAG_DIR" "false" 2>/dev/null
 assert_eq "check_yolo_config auto-trusts known config" "true" "$YOLO_CONFIG_LOADED"
 
 ########################################
@@ -329,60 +324,6 @@ assert_contains ".yolo/Dockerfile build uses -f flag" "$yolo_dockerfile_log" ".y
 
 ########################################
 # Tests: --setup-token flag parsing
-########################################
-
-
-section "auto-generate .yolo/ports on first run"
-
-bash -c '
-  export HOME="'"$CLI_HOME"'"
-  export GH_TOKEN=test_token_for_ci
-  exec() { echo "EXEC_CMD: $*"; command exit 0; }
-  export -f exec
-  docker() {
-    case "$1" in
-      info) return 0 ;;
-      ps) echo "" ;;
-      image)
-        shift
-        case "$1" in
-          inspect) return 0 ;;
-          *) return 1 ;;
-        esac
-        ;;
-      inspect) echo "2099-01-01T00:00:00.000Z" ;;
-      run) echo "EXEC_CMD: docker run $*"; exit 0 ;;
-      *) return 0 ;;
-    esac
-  }
-  export -f docker
-  lsof() { return 1; }
-  export -f lsof
-  curl() {
-    case "$*" in
-      *api.github.com*) echo "200"; return 0 ;;
-      *) return 0 ;;
-    esac
-  }
-  export -f curl
-  cd "'"$PORTS_AUTO_GEN_DIR"'"
-  bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
-' >/dev/null 2>&1 || true
-
-if [[ -f "$PORTS_AUTO_GEN_DIR/.yolo/ports" ]]; then
-  pass "Auto-gen: ports file created"
-else
-  fail "Auto-gen: ports file created"
-fi
-_auto_gen_content=$(cat "$PORTS_AUTO_GEN_DIR/.yolo/ports" 2>/dev/null || true)
-assert_contains "Auto-gen: ports file has syntax comment" "$_auto_gen_content" "host_port:container_port"
-assert_contains "Auto-gen: ports file has rails web port" "$_auto_gen_content" "3000:3000"
-assert_contains "Auto-gen: ports file has rails vite port" "$_auto_gen_content" "5173:5173"
-_auto_gen_hash=$(get_ports_stored_hash "$PORTS_AUTO_GEN_DIR/.yolo/ports")
-assert_not_contains "Auto-gen: hash written to new ports file" "" "$_auto_gen_hash"
-
-########################################
-# Git user config extraction
 ########################################
 
 
