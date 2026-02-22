@@ -472,6 +472,22 @@ update_ports_stored_hash() {
   rm -f "$tmp"
 }
 
+generate_ports_file() {
+  local ports_file="$1"
+  shift
+  local port_flags=("$@")
+
+  {
+    echo "# Port mappings: host_port:container_port"
+    echo "#   host_port      — port exposed on your Mac (what you connect to)"
+    echo "#   container_port — port the process listens on inside the Docker container"
+    for flag in "${port_flags[@]}"; do
+      [[ "$flag" == "-p" ]] && continue
+      echo "$flag"
+    done
+  } > "$ports_file"
+}
+
 ########################################
 # Chrome CDP (used by multiple strategies)
 ########################################
@@ -1774,6 +1790,12 @@ CDPJSON
     migrate_yolo_sessions 2>/dev/null || true
   ) &
   disown
+
+  # Auto-generate .yolo/ports with syntax comment when .yolo/ is trusted but no ports file exists
+  local yolo_dir="${worktree_path}/.yolo"
+  if [[ "${YOLO_CONFIG_LOADED:-}" == true && -d "$yolo_dir" && ! -f "${yolo_dir}/ports" && ${#port_flags[@]} -gt 0 ]]; then
+    generate_ports_file "${yolo_dir}/ports" "${port_flags[@]}"
+  fi
 
   # Record the applied ports hash so future runs can detect changes
   if [[ -f "${worktree_path}/.yolo/ports" ]]; then

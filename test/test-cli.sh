@@ -3519,6 +3519,71 @@ _expected_hash=$(ports_file_content_hash "$PORTS_NO_HASH_DIR/.yolo/ports")
 assert_eq "No hash yet: hash written to ports file on attach" "$_expected_hash" "$_written_hash"
 
 ########################################
+# Fixture: auto-generate ports file — .yolo/ trusted but no ports file yet
+########################################
+
+PORTS_AUTO_GEN_DIR="$TMPDIR_BASE/rails-ports-auto-gen"
+mkdir -p "$PORTS_AUTO_GEN_DIR/config" "$PORTS_AUTO_GEN_DIR/bin" "$PORTS_AUTO_GEN_DIR/.yolo"
+echo "gem 'rails'" > "$PORTS_AUTO_GEN_DIR/Gemfile"
+echo "# app" > "$PORTS_AUTO_GEN_DIR/config/application.rb"
+echo "3.3.0" > "$PORTS_AUTO_GEN_DIR/.ruby-version"
+echo "#!/bin/bash" > "$PORTS_AUTO_GEN_DIR/bin/rails"
+# No .yolo/ports file — simulate a project that has .yolo/ but never had ports configured
+
+########################################
+# Tests: auto-generate ports file on first run
+########################################
+
+section "auto-generate .yolo/ports on first run"
+
+output_ports_auto_gen=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps) echo "" ;;
+      image)
+        shift
+        case "$1" in
+          inspect) return 0 ;;
+          *) return 1 ;;
+        esac
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      run) echo "EXEC_CMD: docker run $*"; exit 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f docker
+  lsof() { return 1; }
+  export -f lsof
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$PORTS_AUTO_GEN_DIR"'"
+  bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+if [[ -f "$PORTS_AUTO_GEN_DIR/.yolo/ports" ]]; then
+  pass "Auto-gen: ports file created"
+else
+  fail "Auto-gen: ports file created"
+fi
+_auto_gen_content=$(cat "$PORTS_AUTO_GEN_DIR/.yolo/ports" 2>/dev/null || true)
+assert_contains "Auto-gen: ports file has syntax comment" "$_auto_gen_content" "host_port:container_port"
+assert_contains "Auto-gen: ports file has rails web port" "$_auto_gen_content" "3000:3000"
+assert_contains "Auto-gen: ports file has rails vite port" "$_auto_gen_content" "5173:5173"
+_auto_gen_hash=$(get_ports_stored_hash "$PORTS_AUTO_GEN_DIR/.yolo/ports")
+assert_not_contains "Auto-gen: hash written to new ports file" "" "$_auto_gen_hash"
+
+########################################
 # Summary
 ########################################
 
