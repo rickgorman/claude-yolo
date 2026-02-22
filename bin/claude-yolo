@@ -698,6 +698,7 @@ ensure_github_token() {
 
 check_yolo_config() {
   local worktree_path="$1"
+  local trust_yolo="${2:-false}"
   local yolo_dir="${worktree_path}/.yolo"
 
   if [[ ! -d "$yolo_dir" ]]; then
@@ -2129,7 +2130,7 @@ main() {
   ensure_github_token "$worktree_path"
 
   # Check .yolo/ trust + load config
-  check_yolo_config "$worktree_path"
+  check_yolo_config "$worktree_path" "$trust_yolo"
 
   # Force rebuild if requested
   if [[ "$force_build" == true ]]; then

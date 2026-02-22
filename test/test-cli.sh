@@ -3536,7 +3536,7 @@ echo "#!/bin/bash" > "$PORTS_AUTO_GEN_DIR/bin/rails"
 
 section "auto-generate .yolo/ports on first run"
 
-output_ports_auto_gen=$(bash -c '
+bash -c '
   export HOME="'"$CLI_HOME"'"
   export GH_TOKEN=test_token_for_ci
   exec() { echo "EXEC_CMD: $*"; command exit 0; }
@@ -3569,7 +3569,7 @@ output_ports_auto_gen=$(bash -c '
   export -f curl
   cd "'"$PORTS_AUTO_GEN_DIR"'"
   bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
-' 2>&1 || true)
+' >/dev/null 2>&1 || true
 
 if [[ -f "$PORTS_AUTO_GEN_DIR/.yolo/ports" ]]; then
   pass "Auto-gen: ports file created"
