@@ -41,6 +41,8 @@ _chrome_mock_prefix='
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
 '
@@ -490,6 +492,25 @@ echo "Darwin"
 MOCKEOF
 chmod +x "$MOCK_BIN/uname"
 
+cat > "$MOCK_BIN/tmux" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/tmux"
+
+cat > "$MOCK_BIN/lsof" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/lsof"
+
+cat > "$MOCK_BIN/curl" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "200"
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/curl"
+
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
@@ -501,7 +522,7 @@ assert_contains "--env injects MY_VAR" "$env_docker_args" "MY_VAR=hello"
 assert_contains "--env injects OTHER_VAR" "$env_docker_args" "OTHER_VAR=world"
 
 # Cleanup mocks
-rm -f "$MOCK_BIN/uname"
+rm -f "$MOCK_BIN/uname" "$MOCK_BIN/tmux" "$MOCK_BIN/lsof" "$MOCK_BIN/curl"
 
 
 section "--env without value shows error"
@@ -548,6 +569,25 @@ echo "Darwin"
 MOCKEOF
 chmod +x "$MOCK_BIN/uname"
 
+cat > "$MOCK_BIN/tmux" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/tmux"
+
+cat > "$MOCK_BIN/lsof" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/lsof"
+
+cat > "$MOCK_BIN/curl" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "200"
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/curl"
+
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
@@ -563,7 +603,7 @@ assert_contains "--env-file strips single quotes" "$envfile_docker_args" "SINGLE
 assert_not_contains "--env-file skips comments" "$envfile_docker_args" "This is a comment"
 
 # Cleanup mocks
-rm -f "$MOCK_BIN/uname"
+rm -f "$MOCK_BIN/uname" "$MOCK_BIN/tmux" "$MOCK_BIN/lsof" "$MOCK_BIN/curl"
 
 
 section "--env-file with missing file shows error"
@@ -601,6 +641,25 @@ echo "Darwin"
 MOCKEOF
 chmod +x "$MOCK_BIN/uname"
 
+cat > "$MOCK_BIN/tmux" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/tmux"
+
+cat > "$MOCK_BIN/lsof" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/lsof"
+
+cat > "$MOCK_BIN/curl" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "200"
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/curl"
+
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
@@ -612,7 +671,7 @@ assert_contains "Combined: --env var present" "$combined_docker_args" "INLINE_VA
 assert_contains "Combined: --env-file var present" "$combined_docker_args" "API_KEY=secret123"
 
 # Cleanup mocks
-rm -f "$MOCK_BIN/uname"
+rm -f "$MOCK_BIN/uname" "$MOCK_BIN/tmux" "$MOCK_BIN/lsof" "$MOCK_BIN/curl"
 
 ########################################
 # Tests: -p / --print headless mode
@@ -638,6 +697,8 @@ PRINT_OUTPUT=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -677,6 +738,8 @@ PRINT_LONG_OUTPUT=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -712,6 +775,8 @@ output_trust=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -773,6 +838,8 @@ output_reset=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -830,6 +897,8 @@ output_trust_yolo=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {

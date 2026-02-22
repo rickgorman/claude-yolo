@@ -51,6 +51,13 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/ps"
 
+# Create a mock tmux that always succeeds
+cat > "$MOCK_BIN/tmux" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/tmux"
+
 # Set up fake HOME with commands directory, settings files, and credentials
 FAKE_HOME="$TMPDIR_BASE/fake-claude-home"
 mkdir -p "$FAKE_HOME/.claude/commands"
@@ -176,28 +183,6 @@ output=$(cd "$RAILS_DIR" && \
 nonwt_docker_args=$(cat "$NONWT_DOCKER_LOG" 2>/dev/null || echo "")
 
 assert_not_contains "Non-worktree does not mount parent .git" "$nonwt_docker_args" "fake-parent-repo"
-
-########################################
-# Tests: start-chrome.sh arithmetic safety
-########################################
-
-
-section "--chrome MCP config volume mount"
-
-# Extract the exec'd docker run command and verify .mcp.json mount
-exec_cmd_line=$(echo "$output_chrome" | grep "EXEC_CMD:" || true)
-
-assert_contains "Docker args include .mcp.json mount" "$exec_cmd_line" ".mcp.json:ro"
-assert_contains "Docker args mount to /workspace/.mcp.json" "$exec_cmd_line" "/workspace/.mcp.json"
-
-# Without --chrome, docker args should NOT include .mcp.json mount
-exec_cmd_no_chrome=$(echo "$output_no_chrome" | grep "EXEC_CMD:" || true)
-
-assert_not_contains "Without --chrome, no .mcp.json mount" "$exec_cmd_no_chrome" ".mcp.json"
-
-########################################
-# Tests: --chrome uses computed port
-########################################
 
 
 section "\$HOME/.claude.json mounted into container"

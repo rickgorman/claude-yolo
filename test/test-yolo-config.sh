@@ -33,6 +33,8 @@ output_yolo_strategy=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -77,6 +79,8 @@ output_bad_yolo_strategy=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -116,6 +120,8 @@ output_flag_override=$(bash -c '
     esac
   }
   export -f docker
+  tmux() { return 0; }
+  export -f tmux
   lsof() { return 1; }
   export -f lsof
   curl() {
@@ -173,6 +179,25 @@ cat > "$MOCK_BIN/uname" << 'MOCKEOF'
 echo "Darwin"
 MOCKEOF
 chmod +x "$MOCK_BIN/uname"
+
+cat > "$MOCK_BIN/tmux" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/tmux"
+
+cat > "$MOCK_BIN/lsof" << 'MOCKEOF'
+#!/usr/bin/env bash
+exit 1
+MOCKEOF
+chmod +x "$MOCK_BIN/lsof"
+
+cat > "$MOCK_BIN/curl" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "200"
+exit 0
+MOCKEOF
+chmod +x "$MOCK_BIN/curl"
 
 output=$(cd "$YOLO_ENV_DIR" && \
   HOME="$YOLO_ENV_TRUST_DIR" \
