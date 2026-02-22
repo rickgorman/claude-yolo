@@ -2,6 +2,11 @@
 
 > AI pair programming in isolated Docker containers - now in Go!
 
+[![Tests](https://github.com/rickgorman/claude-yolo/workflows/Tests/badge.svg)](https://github.com/rickgorman/claude-yolo/actions)
+[![codecov](https://codecov.io/gh/rickgorman/claude-yolo/branch/main/graph/badge.svg)](https://codecov.io/gh/rickgorman/claude-yolo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rickgorman/claude-yolo)](https://goreportcard.com/report/github.com/rickgorman/claude-yolo)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Run Claude Code in isolated, project-specific Docker containers with automatic environment detection.
 
 ## ✨ Features
