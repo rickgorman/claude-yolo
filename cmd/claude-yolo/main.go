@@ -40,6 +40,7 @@ func main() {
 			os.Exit(0)
 		}
 		ui.Fail("Error parsing arguments: %v", err)
+		ui.Info("Run %s for usage information", ui.Bold("claude-yolo --help"))
 		os.Exit(1)
 	}
 
@@ -93,6 +94,7 @@ func handleYoloMode(args *cli.Args) {
 	worktreePath, err := git.GetWorktreePath()
 	if err != nil {
 		ui.Fail("Failed to get worktree path: %v", err)
+		ui.Info("Make sure you're running claude-yolo from inside a Git repository")
 		ui.Footer()
 		os.Exit(1)
 	}
@@ -167,6 +169,8 @@ func handleYoloMode(args *cli.Args) {
 	strategyName := determineStrategy(args, yoloConfig, worktreePath)
 	if strategyName == "" {
 		ui.Fail("No strategy selected")
+		ui.Info("Try: %s or set one in .yolo/config", ui.Bold("claude-yolo --yolo --strategy <name>"))
+		ui.Info("Available strategies: rails, node, python, go, rust, android, jekyll, generic")
 		ui.Footer()
 		os.Exit(1)
 	}
@@ -176,6 +180,7 @@ func handleYoloMode(args *cli.Args) {
 	strat, err := detector.GetStrategy(strategyName)
 	if err != nil {
 		ui.Fail("Invalid strategy: %s", strategyName)
+		ui.Info("Available strategies: rails, node, python, go, rust, android, jekyll, generic")
 		ui.Footer()
 		os.Exit(1)
 	}

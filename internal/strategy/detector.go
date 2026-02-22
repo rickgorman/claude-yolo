@@ -154,7 +154,7 @@ func (d *Detector) DetectBestStrategy(projectPath string) (string, error) {
 		return results[0].Strategy, nil
 	}
 
-	return "", fmt.Errorf("no strategy detected")
+	return "", fmt.Errorf("no strategy detected (available: rails, node, python, go, rust, android, jekyll, generic)\n\nManually specify one with: claude-yolo --yolo --strategy <name>")
 }
 
 // runDetectScript executes a strategy's detect.sh script and parses the output.

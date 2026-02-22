@@ -140,6 +140,7 @@ func ResolvePortConflicts(portMappings []PortMapping, autoRemap bool) ([]PortMap
 		// Headless mode: auto-remap without prompting
 		if !allRemappable {
 			ui.Fail("Cannot auto-remap all conflicting ports")
+			ui.Info("Run interactively without --force-build to resolve manually, or free the conflicting ports")
 			return portMappings, fmt.Errorf("port conflicts cannot be auto-resolved")
 		}
 
