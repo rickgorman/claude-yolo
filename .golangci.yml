@@ -1,0 +1,75 @@
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - test
+    - strategies
+
+linters:
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - misspell
+    - unconvert
+    - unparam
+    - revive
+    - gocritic
+    - gocyclo
+    - dupl
+
+linters-settings:
+  gofmt:
+    simplify: true
+
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - assignOp
+      - boolExprSimplify
+      - builtinShadow
+      - dupImport
+      - emptyFallthrough
+      - emptyStringTest
+      - hexLiteral
+      - methodExprCall
+      - nilValReturn
+      - rangeExprCopy
+      - regexpMust
+      - sloppyLen
+      - stringXbytes
+      - typeAssertChain
+      - typeUnparen
+      - unlambda
+      - unnamedResult
+      - unnecessaryBlock
+      - weakCond
+
+  gocyclo:
+    min-complexity: 15
+
+  dupl:
+    threshold: 100
+
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - dupl

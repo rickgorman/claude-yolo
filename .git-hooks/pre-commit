@@ -1,0 +1,114 @@
+#!/bin/bash
+# Pre-commit hook for claude-yolo development
+# Install: ln -s ../../.git-hooks/pre-commit .git/hooks/pre-commit
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Check if go is installed
+if ! command -v go &> /dev/null; then
+    echo -e "${RED}✗${NC} Go is not installed"
+    exit 1
+fi
+
+# Get list of staged Go files
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+
+if [ -z "$STAGED_GO_FILES" ]; then
+    echo -e "${GREEN}✓${NC} No Go files to check"
+    exit 0
+fi
+
+echo "Checking $(echo "$STAGED_GO_FILES" | wc -l) Go files..."
+
+# 1. Format check
+echo -n "Checking code formatting... "
+UNFORMATTED=$(gofmt -l $STAGED_GO_FILES 2>&1 || true)
+if [ -n "$UNFORMATTED" ]; then
+    echo -e "${RED}✗${NC}"
+    echo -e "${YELLOW}The following files need formatting:${NC}"
+    echo "$UNFORMATTED"
+    echo ""
+    echo "Run: gofmt -w $UNFORMATTED"
+    echo "Or:  make fmt"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC}"
+
+# 2. Go vet
+echo -n "Running go vet... "
+if ! go vet ./... &> /dev/null; then
+    echo -e "${RED}✗${NC}"
+    echo "go vet found issues:"
+    go vet ./...
+    exit 1
+fi
+echo -e "${GREEN}✓${NC}"
+
+# 3. golangci-lint (if available)
+if command -v golangci-lint &> /dev/null; then
+    echo -n "Running golangci-lint... "
+    if ! golangci-lint run --deadline=5m &> /tmp/golangci-lint.out; then
+        echo -e "${RED}✗${NC}"
+        cat /tmp/golangci-lint.out
+        rm -f /tmp/golangci-lint.out
+        exit 1
+    fi
+    rm -f /tmp/golangci-lint.out
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${YELLOW}⚠${NC} golangci-lint not installed (skipping)"
+    echo "  Install: brew install golangci-lint"
+fi
+
+# 4. Check for debug statements
+echo -n "Checking for debug statements... "
+FORBIDDEN_PATTERNS="fmt\.Print\(|TODO|FIXME|XXX|HACK"
+MATCHES=$(git grep -E "$FORBIDDEN_PATTERNS" $STAGED_GO_FILES || true)
+if [ -n "$MATCHES" ]; then
+    echo -e "${YELLOW}⚠${NC}"
+    echo "Found potential debug statements or TODOs:"
+    echo "$MATCHES"
+    echo ""
+    echo -e "${YELLOW}This is a warning, not an error. Commit anyway? [y/N]${NC}"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✓${NC}"
+fi
+
+# 5. Build check
+echo -n "Checking if code builds... "
+if ! go build -o /dev/null ./cmd/claude-yolo &> /tmp/build.out; then
+    echo -e "${RED}✗${NC}"
+    cat /tmp/build.out
+    rm -f /tmp/build.out
+    exit 1
+fi
+rm -f /tmp/build.out
+echo -e "${GREEN}✓${NC}"
+
+# 6. Run tests (quick)
+echo -n "Running tests... "
+if ! go test -short ./... &> /tmp/test.out; then
+    echo -e "${RED}✗${NC}"
+    cat /tmp/test.out
+    rm -f /tmp/test.out
+    echo ""
+    echo "Tests failed. Fix them or use 'git commit --no-verify' to skip."
+    exit 1
+fi
+rm -f /tmp/test.out
+echo -e "${GREEN}✓${NC}"
+
+echo ""
+echo -e "${GREEN}✓ All pre-commit checks passed!${NC}"

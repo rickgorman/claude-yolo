@@ -1,0 +1,406 @@
+// This is a draft/skeleton of the full main.go
+// Will be completed once container and github packages are ready from agents
+// Keeping current simple main.go for now so binary continues to compile
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+
+	"github.com/rickgorman/claude-yolo/internal/cli"
+	"github.com/rickgorman/claude-yolo/internal/chrome"
+	// "github.com/rickgorman/claude-yolo/internal/container" // Agent working on this
+	// "github.com/rickgorman/claude-yolo/internal/github"    // Agent working on this
+	"github.com/rickgorman/claude-yolo/internal/git"
+	"github.com/rickgorman/claude-yolo/internal/session"
+	"github.com/rickgorman/claude-yolo/internal/strategy"
+	"github.com/rickgorman/claude-yolo/internal/ui"
+	"github.com/rickgorman/claude-yolo/internal/yoloconfig"
+	"github.com/rickgorman/claude-yolo/pkg/hash"
+)
+
+const version = "2.0.0-dev"
+
+func mainFull() {
+	// Parse arguments
+	args, err := cli.Parse(os.Args)
+	if err != nil {
+		if err.Error() == "show_help" {
+			showHelp()
+			os.Exit(0)
+		}
+		if err.Error() == "show_version" {
+			fmt.Printf("claude-yolo %s (Go rewrite)\n", version)
+			os.Exit(0)
+		}
+		ui.Fail("Error parsing arguments: %v", err)
+		os.Exit(1)
+	}
+
+	// --detect mode: non-interactive strategy detection
+	if args.DetectOnlyPath != "" {
+		handleDetectMode(args.DetectOnlyPath)
+		return
+	}
+
+	// Normal mode without --yolo: pass through to native claude
+	if !args.YoloMode {
+		passthroughToNativeClaude(args.ClaudeArgs)
+		return
+	}
+
+	// YOLO mode - full Docker container workflow
+	handleYoloMode(args)
+}
+
+func handleDetectMode(path string) {
+	detector := strategy.NewDetector(getStrategiesDir())
+	strategyName, err := detector.DetectBestStrategy(path)
+	if err == nil && strategyName != "" {
+		fmt.Println(strategyName)
+	}
+	// Silent exit if no strategy detected
+}
+
+func passthroughToNativeClaude(claudeArgs []string) {
+	cmd := exec.Command("claude", claudeArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+
+func handleYoloMode(args *cli.Args) {
+	// Check dependencies
+	checkDependencies()
+
+	// Print header
+	ui.Header()
+
+	// Get worktree path
+	worktreePath, err := git.GetWorktreePath()
+	if err != nil {
+		ui.Fail("Failed to get worktree path: %v", err)
+		ui.Footer()
+		os.Exit(1)
+	}
+
+	// Generate path hash for container/volume names
+	pathHash := hash.PathHash(worktreePath)
+
+	// Handle --reset: remove existing containers
+	if args.ResetMode {
+		// TODO: Use container package to remove containers matching hash
+		ui.Info("Removed existing container(s)")
+		args.ForceBuild = true
+	}
+
+	// Migrate legacy yolo sessions
+	session.MigrateYoloSessions()
+
+	// Check for already-running container
+	// TODO: Use container package
+	// runningContainer := container.FindRunning(pathHash)
+	// if runningContainer != "" {
+	//     handlePortChanges(worktreePath, runningContainer)
+	//     attachToContainer(runningContainer, args.ClaudeArgs)
+	//     return
+	// }
+
+	// Check for stopped container
+	// TODO: Use container package
+	// stoppedContainer := container.FindStopped(pathHash)
+	// if stoppedContainer != "" {
+	//     startStoppedContainer(stoppedContainer, args.ClaudeArgs)
+	//     return
+	// }
+
+	// Handle --setup-token
+	if args.SetupTokenMode {
+		// TODO: Implement setup-token workflow with tmux
+		ui.Fail("--setup-token not yet implemented in Go version")
+		ui.Footer()
+		os.Exit(1)
+	}
+
+	// Load .yolo/ configuration
+	yoloConfig, err := yoloconfig.Load(worktreePath, args.TrustYolo)
+	if err != nil {
+		ui.Warn(".yolo/ config error: %v", err)
+	}
+
+	// Determine strategy
+	strategyName := determineStrategy(args, yoloConfig, worktreePath)
+	if strategyName == "" {
+		ui.Fail("No strategy selected")
+		ui.Footer()
+		os.Exit(1)
+	}
+
+	// Get strategy instance
+	detector := strategy.NewDetector(getStrategiesDir())
+	strat, err := detector.GetStrategy(strategyName)
+	if err != nil {
+		ui.Fail("Invalid strategy: %s", strategyName)
+		ui.Footer()
+		os.Exit(1)
+	}
+
+	// Ensure GitHub token
+	// TODO: Use github package
+	// if err := github.EnsureToken(worktreePath, args.TrustGitHubToken); err != nil {
+	//     ui.Fail("GitHub token validation failed: %v", err)
+	//     ui.Footer()
+	//     os.Exit(1)
+	// }
+
+	// Check for .yolo/ trust and prompt if needed
+	if yoloConfig != nil && !yoloConfig.Trusted {
+		if !promptYoloTrust(yoloConfig) {
+			yoloConfig = nil // User declined
+		}
+	}
+
+	// Build image if needed
+	// TODO: Use container package
+	// imageName := buildImageIfNeeded(strat, pathHash, yoloConfig, args)
+
+	// Start Chrome if --chrome flag
+	cdpPort := hash.CDPPortForHash(pathHash)
+	if args.ChromeMode {
+		if err := chrome.EnsureRunning(cdpPort, getRepoDir()); err != nil {
+			ui.Fail("Chrome startup failed: %v", err)
+			ui.Footer()
+			os.Exit(1)
+		}
+	}
+
+	// Run container
+	// TODO: Use container package with all the complex mounting/env/port logic
+	// runContainer(strat, pathHash, worktreePath, yoloConfig, args)
+
+	ui.Info("Full Docker container workflow not yet complete")
+	ui.Fail("Container and GitHub packages still being implemented by agents")
+	ui.Footer()
+}
+
+func determineStrategy(args *cli.Args, yoloConfig *yoloconfig.Config, worktreePath string) string {
+	// .yolo/strategy override
+	if yoloConfig != nil && yoloConfig.Strategy != "" {
+		ui.Info("Using strategy: %s (.yolo/strategy)", ui.Bold(yoloConfig.Strategy))
+		return yoloConfig.Strategy
+	}
+
+	// --strategy flag
+	if args.Strategy != "" {
+		ui.Info("Using strategy: %s (--strategy flag)", ui.Bold(args.Strategy))
+		return args.Strategy
+	}
+
+	// Auto-detection with user choice
+	detector := strategy.NewDetector(getStrategiesDir())
+	results, err := detector.RunDetection(worktreePath)
+	if err != nil || len(results) == 0 {
+		// Try deep detection in subdirectories
+		results, _ = detector.RunDetectionDeep(worktreePath)
+	}
+
+	if len(results) == 0 {
+		return chooseFromFullList(detector)
+	}
+
+	// Single high-confidence match
+	if len(results) == 1 && results[0].Confidence >= 80 {
+		top := results[0]
+		ui.Success("Detected: %s (%d%%)", ui.Bold(top.Strategy), top.Confidence)
+		ui.DimMsg(top.Evidence)
+		return top.Strategy
+	}
+
+	// Multiple matches - show menu
+	return showStrategyMenu(results, detector)
+}
+
+func showStrategyMenu(results []strategy.DetectionResult, detector *strategy.Detector) string {
+	ui.BlankLine()
+	fmt.Fprintln(ui.Out, "  Detected:")
+
+	for i, result := range results {
+		glyph := "○"
+		color := ui.Yellow
+		if result.Confidence >= 80 {
+			glyph = "●"
+			color = ui.Green
+		}
+
+		fmt.Fprintf(ui.Out, "    %s  %s %-10s %s%3d%% %s%s%s\n",
+			ui.Bold(fmt.Sprintf("%d", i+1)),
+			color(glyph),
+			result.Strategy,
+			ui.Dim(""),
+			result.Confidence,
+			ui.Dim("%   "),
+			ui.Dim(result.Evidence),
+			ui.Dim(""))
+	}
+
+	otherChoice := len(results) + 1
+	fmt.Fprintf(ui.Out, "    %s  ○ %-10s        %s\n",
+		ui.Bold(fmt.Sprintf("%d", otherChoice)),
+		"other",
+		ui.Dim("see all supported / generate new"))
+	ui.BlankLine()
+
+	topStrategy := results[0].Strategy
+	choice := ui.AskChoice(fmt.Sprintf("Press ENTER for %s, or select [1-%d]", topStrategy, otherChoice), 1, otherChoice)
+
+	if choice == -1 || choice == 0 {
+		return topStrategy
+	}
+
+	if choice == len(results) {
+		return chooseFromFullList(detector)
+	}
+
+	return results[choice].Strategy
+}
+
+func chooseFromFullList(detector *strategy.Detector) string {
+	strategies := detector.ListStrategies()
+
+	ui.BlankLine()
+	ui.Warn("No environment auto-detected")
+	ui.BlankLine()
+	fmt.Fprintln(ui.Out, "  Select an environment:")
+
+	for i, name := range strategies {
+		// TODO: Load description from strategies/*/description file
+		fmt.Fprintf(ui.Out, "    %s  %-12s\n", ui.Bold(fmt.Sprintf("%d", i+1)), name)
+	}
+
+	otherChoice := len(strategies) + 1
+	fmt.Fprintf(ui.Out, "    %s  %-12s %s\n",
+		ui.Bold(fmt.Sprintf("%d", otherChoice)),
+		"other",
+		ui.Dim("generate prompt for new strategy"))
+	ui.BlankLine()
+
+	choice := ui.AskChoice("▸", 0, otherChoice)
+
+	if choice == -1 {
+		return ""
+	}
+
+	if choice == len(strategies) {
+		// TODO: Generate unknown prompt
+		return ""
+	}
+
+	return strategies[choice]
+}
+
+func promptYoloTrust(config *yoloconfig.Config) bool {
+	ui.BlankLine()
+	ui.Warn("This project has a %s configuration directory", ui.Bold(".yolo/"))
+
+	// List files
+	entries, _ := os.ReadDir(config.Dir)
+	ui.DimMsg("Files:")
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			ui.DimMsg("  " + entry.Name())
+		}
+	}
+	ui.BlankLine()
+
+	response := ui.AskViewOrApply("Apply .yolo/ config?")
+
+	if response == "cancel" {
+		return false
+	}
+
+	if response == "view" {
+		// Show file contents
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			ui.BlankLine()
+			ui.DimMsg("── " + entry.Name() + " ──")
+			data, _ := os.ReadFile(filepath.Join(config.Dir, entry.Name()))
+			for _, line := range strings.Split(string(data), "\n") {
+				ui.DimMsg("    " + line)
+			}
+		}
+		ui.BlankLine()
+
+		return ui.AskYesNo("Apply .yolo/ config?", true)
+	}
+
+	return true // "apply"
+}
+
+func checkDependencies() {
+	missing := []string{}
+
+	if !commandExists("docker") {
+		missing = append(missing, "docker")
+	}
+	if !commandExists("git") {
+		missing = append(missing, "git")
+	}
+	if !commandExists("curl") {
+		missing = append(missing, "curl")
+	}
+	if !commandExists("tmux") {
+		missing = append(missing, "tmux")
+	}
+
+	if len(missing) > 0 {
+		ui.Fail("Missing required dependencies: %s", ui.Bold(strings.Join(missing, " ")))
+		ui.BlankLine()
+
+		if runtime.GOOS == "darwin" {
+			ui.DimMsg("Install with: brew install " + strings.Join(missing, " "))
+		} else {
+			ui.DimMsg("Install with: sudo apt-get install " + strings.Join(missing, " "))
+		}
+
+		os.Exit(1)
+	}
+
+	// Check Docker is running
+	cmd := exec.Command("docker", "info")
+	if err := cmd.Run(); err != nil {
+		ui.Fail("Docker is not running. Start Docker Desktop and try again.")
+		os.Exit(1)
+	}
+}
+
+func commandExists(cmd string) bool {
+	_, err := exec.LookPath(cmd)
+	return err == nil
+}
+
+func getRepoDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	// Assume binary is in bin/, repo is parent
+	return filepath.Dir(filepath.Dir(exe))
+}
+
+func getStrategiesDir() string {
+	return filepath.Join(getRepoDir(), "strategies")
+}

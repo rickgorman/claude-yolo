@@ -16,8 +16,8 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - name: Lint bin/claude-yolo
-        run: shellcheck -x -S warning -e SC1090 bin/claude-yolo
+      - name: Lint bin/claude-yolo-bash
+        run: shellcheck -x -S warning -e SC1090 bin/claude-yolo-bash
 
       - name: Lint scripts/start-chrome.sh
         run: shellcheck -x -S warning -e SC1090 scripts/start-chrome.sh
@@ -31,8 +31,48 @@ jobs:
       - name: Lint test files
         run: shellcheck -x -S warning -e SC1090 test/test-cli.sh test/test-chrome-e2e.sh test/test-chrome-multi.sh
 
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  go-test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run Go tests with coverage
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   unit-tests:
-    name: Unit Tests
+    name: Unit Tests (Bash)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

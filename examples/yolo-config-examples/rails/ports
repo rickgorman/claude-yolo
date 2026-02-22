@@ -1,0 +1,8 @@
+# Rails server
+3001:3000
+
+# PostgreSQL
+5433:5432
+
+# Redis
+6380:6379

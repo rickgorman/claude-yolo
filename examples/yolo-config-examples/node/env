@@ -1,0 +1,17 @@
+# Node environment
+NODE_ENV=development
+
+# Application settings
+PORT=3000
+HOST=0.0.0.0
+
+# API configuration
+API_BASE_URL=https://api.example.com
+API_TIMEOUT=30000
+
+# Feature flags
+ENABLE_DEBUG=true
+ENABLE_ANALYTICS=false
+
+# Database
+MONGODB_URI=mongodb://localhost:27017/myapp

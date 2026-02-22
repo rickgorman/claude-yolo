@@ -10,6 +10,7 @@ set -euo pipefail
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(dirname "$TEST_DIR")"
 CLI="$REPO_DIR/bin/claude-yolo"
+CLI_BASH="$REPO_DIR/bin/claude-yolo-bash"  # Bash version for sourcing functions
 STRATEGIES_DIR="$REPO_DIR/strategies"
 
 # Create a temporary directory for test fixtures (if not already created)
@@ -135,8 +136,16 @@ mkdir -p "$EMPTY_HOME"
 ########################################
 
 # Source the CLI (with main disabled) to get its functions
+# Use bash version if binary is Go (can't source binary)
+_cli_to_source="$CLI"
+if file "$CLI" 2>/dev/null | grep -q "executable"; then
+  # It's a compiled binary, use bash version for sourcing
+  if [[ -f "$CLI_BASH" ]]; then
+    _cli_to_source="$CLI_BASH"
+  fi
+fi
 _tmp_script="$TMPDIR_BASE/claude-yolo-functions.sh"
-sed 's/^main "\$@"$/# main "$@"/' "$CLI" > "$_tmp_script"
+sed 's/^main "\$@"$/# main "$@"/' "$_cli_to_source" > "$_tmp_script"
 source "$_tmp_script"
 
 # Restore paths that sourcing overwrote (BASH_SOURCE[0] pointed to temp file)
