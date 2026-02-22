@@ -74,6 +74,8 @@ claude-yolo --detect /path/to/project
 
 - **[AGENTS.md](AGENTS.md)** - AI agent playbook and CI procedures
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and changes
+- **[RELEASE.md](RELEASE.md)** - Release process for maintainers
+- **[SECURITY.md](SECURITY.md)** - Security audit and best practices
 - **Package Docs** - Run `go doc` on any package
 
 ## 🧪 Development
