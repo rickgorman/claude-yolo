@@ -854,6 +854,12 @@ output_reset=$(bash -c '
 ' 2>&1 || true)
 
 assert_contains "--reset removes existing containers" "$output_reset" "Removed existing container"
+if ! echo "$output_reset" | grep -q "Building"; then
+  echo "DEBUG: --reset output does not contain 'Building'" >&2
+  echo "DEBUG: Full output:" >&2
+  echo "$output_reset" >&2
+  echo "DEBUG: End output" >&2
+fi
 assert_contains "--reset forces rebuild" "$output_reset" "Building"
 
 ########################################
