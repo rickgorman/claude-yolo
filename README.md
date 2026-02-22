@@ -85,7 +85,12 @@ make lint
 
 # All tests (Go + bash)
 make test-all
+
+# Install git hooks (recommended)
+make install-hooks
 ```
+
+Git hooks automatically run formatting, linting, and tests before each commit. See [.git-hooks/README.md](.git-hooks/README.md) for details.
 
 ## 📄 License
 

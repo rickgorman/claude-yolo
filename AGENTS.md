@@ -143,6 +143,39 @@ go build ./...
 - [ ] go fmt applied
 - [ ] go vet passes
 
+### Git Hooks
+
+**Install pre-commit hooks** for automatic quality checks:
+
+```bash
+make install-hooks
+```
+
+The pre-commit hook runs before each commit:
+- ✅ Checks code formatting (`gofmt`)
+- ✅ Runs `go vet` for common mistakes
+- ✅ Runs `golangci-lint` if available
+- ⚠️ Warns about debug statements (`fmt.Print`, `TODO`, etc.)
+- ✅ Ensures code builds
+- ✅ Runs quick tests (`go test -short`)
+
+**Bypass when needed**:
+```bash
+git commit --no-verify  # Use sparingly!
+```
+
+**Troubleshooting**:
+```bash
+# Reinstall hooks
+rm .git/hooks/pre-commit
+make install-hooks
+
+# Test hook manually
+bash -x .git-hooks/pre-commit
+```
+
+See [.git-hooks/README.md](.git-hooks/README.md) for full documentation.
+
 ---
 
 ## Adding New Strategies

@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean test-unit test-integration test-all
+.PHONY: build test lint install clean test-unit test-integration test-all install-hooks
 
 # Go binary name
 BINARY=claude-yolo
@@ -58,3 +58,8 @@ deps:
 # Show test coverage
 cover: test
 	@go tool cover -html=coverage.out
+
+# Install git hooks
+install-hooks:
+	@echo "Installing git hooks..."
+	@./.git-hooks/install.sh
