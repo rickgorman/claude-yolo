@@ -437,6 +437,64 @@ resolve_port_conflicts() {
 }
 
 ########################################
+# .yolo/ports change detection
+########################################
+
+ports_file_content_hash() {
+  local ports_file="$1"
+  local content
+  content=$(grep -Ev '^\s*(#|$)' "$ports_file" 2>/dev/null || true)
+  if [[ -z "$content" ]]; then
+    echo "empty"
+    return 0
+  fi
+  if command -v md5 &>/dev/null; then
+    printf '%s' "$content" | md5 | cut -c1-16
+  elif command -v md5sum &>/dev/null; then
+    printf '%s' "$content" | md5sum | cut -c1-16
+  else
+    printf '%s' "$content" | shasum | cut -c1-16
+  fi
+}
+
+get_ports_stored_hash() {
+  local ports_file="$1"
+  grep '^# _yolo_hash:' "$ports_file" 2>/dev/null | head -1 | sed 's/^# _yolo_hash:[[:space:]]*//' || true
+}
+
+update_ports_stored_hash() {
+  local ports_file="$1"
+  local new_hash="$2"
+  local tmp
+  tmp=$(mktemp)
+  # Remove old hash comment and WARNING comment if present
+  grep -Ev '^# (_yolo_hash|WARNING):' "$ports_file" > "$tmp" || true
+  # Add hash with warning at top of file
+  {
+    echo "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"
+    echo "# _yolo_hash: ${new_hash}"
+    cat "$tmp"
+  } > "$ports_file"
+  rm -f "$tmp"
+}
+
+generate_ports_file() {
+  local ports_file="$1"
+  shift
+  local port_flags=("$@")
+
+  {
+    echo "# Port mappings: host_port:container_port"
+    echo "#   host_port      — port exposed on your Mac (what you connect to)"
+    echo "#   container_port — port the process listens on inside the Docker container"
+    for flag in "${port_flags[@]}"; do
+      [[ "$flag" == "-p" ]] && continue
+      echo "$flag"
+    done
+  } > "$ports_file"
+}
+
+########################################
 # Chrome CDP (used by multiple strategies)
 ########################################
 
@@ -646,6 +704,7 @@ ensure_github_token() {
 
 check_yolo_config() {
   local worktree_path="$1"
+  local trust_yolo="${2:-false}"
   local yolo_dir="${worktree_path}/.yolo"
 
   if [[ ! -d "$yolo_dir" ]]; then
@@ -722,6 +781,129 @@ check_yolo_config() {
   echo "$config_hash" >> "$trust_file"
   YOLO_CONFIG_LOADED=true
   success ".yolo/ config loaded"
+}
+
+########################################
+# Git user config extraction
+########################################
+
+extract_git_user_config() {
+  # Extract user.name and user.email from host .gitconfig and any included files
+  # Returns: user.name=<name>\nuser.email=<email> (or partial if only one found)
+
+  local gitconfig="${HOME}/.gitconfig"
+  local user_name=""
+  local user_email=""
+
+  if [[ ! -f "$gitconfig" ]]; then
+    return 0
+  fi
+
+  # Process gitconfig and any included files
+  local -a config_files=("$gitconfig")
+  local processed_count=0
+  local max_depth=10  # Prevent infinite include loops
+
+  while [[ ${#config_files[@]} -gt 0 && $processed_count -lt $max_depth ]]; do
+    local current_file="${config_files[0]}"
+    config_files=("${config_files[@]:1}")  # Remove first element
+    processed_count=$((processed_count + 1))
+
+    if [[ ! -f "$current_file" ]]; then
+      continue
+    fi
+
+    # Extract user.name if not already found
+    if [[ -z "$user_name" ]]; then
+      user_name=$(git config -f "$current_file" user.name 2>/dev/null || true)
+    fi
+
+    # Extract user.email if not already found
+    if [[ -z "$user_email" ]]; then
+      user_email=$(git config -f "$current_file" user.email 2>/dev/null || true)
+    fi
+
+    # Find and queue included files
+    while IFS= read -r include_path; do
+      # Expand ~ to HOME
+      include_path="${include_path/#\~/$HOME}"
+      if [[ -f "$include_path" ]]; then
+        config_files+=("$include_path")
+      fi
+    done < <(git config -f "$current_file" --get-all include.path 2>/dev/null || true)
+  done
+
+  # Output results
+  [[ -n "$user_name" ]] && echo "user.name=$user_name"
+  [[ -n "$user_email" ]] && echo "user.email=$user_email"
+}
+
+prompt_git_user_config() {
+  # Prompt user for missing git config values
+  # Args: $1 = user_name (may be empty), $2 = user_email (may be empty)
+  # Returns: user.name=<name>\nuser.email=<email>
+
+  local user_name="$1"
+  local user_email="$2"
+
+  # Skip prompting in non-interactive mode
+  if [[ ! -t 0 ]]; then
+    [[ -n "$user_name" ]] && echo "user.name=$user_name"
+    [[ -n "$user_email" ]] && echo "user.email=$user_email"
+    return 0
+  fi
+
+  echo "" >&2
+  warn "Git user configuration needed for commits"
+  echo "" >&2
+
+  if [[ -z "$user_name" ]]; then
+    read -r -p "  Enter your name: " user_name >&2
+  fi
+
+  if [[ -z "$user_email" ]]; then
+    read -r -p "  Enter your email: " user_email >&2
+  fi
+
+  echo "user.name=$user_name"
+  echo "user.email=$user_email"
+}
+
+setup_container_gitconfig() {
+  # Create a minimal .gitconfig in the container with user.name and user.email
+  # Prompts user if values are missing
+
+  local config_output
+  config_output=$(extract_git_user_config)
+
+  local user_name=""
+  local user_email=""
+
+  # Parse extracted config
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+      user_name="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+      user_email="${BASH_REMATCH[1]}"
+    fi
+  done <<< "$config_output"
+
+  # Prompt for missing values
+  if [[ -z "$user_name" || -z "$user_email" ]]; then
+    local prompted
+    prompted=$(prompt_git_user_config "$user_name" "$user_email")
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+        user_name="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+        user_email="${BASH_REMATCH[1]}"
+      fi
+    done <<< "$prompted"
+  fi
+
+  # Return the config to be written by the caller
+  echo "user.name=$user_name"
+  echo "user.email=$user_email"
 }
 
 ########################################
@@ -1493,10 +1675,16 @@ run_with_strategy() {
     done < "${worktree_path}/.yolo/env"
   fi
 
-  # Mount git config read-only
-  if [[ -f "${HOME}/.gitconfig" ]]; then
-    docker_args+=(-v "${HOME}/.gitconfig:/home/claude/.gitconfig:ro")
-  fi
+  # Extract git user config and pass as environment variables
+  local git_user_config
+  git_user_config=$(setup_container_gitconfig)
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^user\.name=(.*)$ ]]; then
+      docker_args+=(-e "GIT_USER_NAME=${BASH_REMATCH[1]}")
+    elif [[ "$line" =~ ^user\.email=(.*)$ ]]; then
+      docker_args+=(-e "GIT_USER_EMAIL=${BASH_REMATCH[1]}")
+    fi
+  done <<< "$git_user_config"
 
   # Mount host CLAUDE.md read-only
   if [[ -f "${HOME}/.claude/CLAUDE.md" ]]; then
@@ -1738,6 +1926,19 @@ CDPJSON
     migrate_yolo_sessions 2>/dev/null || true
   ) &
   disown
+
+  # Auto-generate .yolo/ports with syntax comment when .yolo/ is trusted but no ports file exists
+  local yolo_dir="${worktree_path}/.yolo"
+  if [[ "${YOLO_CONFIG_LOADED:-}" == true && -d "$yolo_dir" && ! -f "${yolo_dir}/ports" && ${#port_flags[@]} -gt 0 ]]; then
+    generate_ports_file "${yolo_dir}/ports" "${port_flags[@]}"
+  fi
+
+  # Record the applied ports hash so future runs can detect changes
+  if [[ -f "${worktree_path}/.yolo/ports" ]]; then
+    local applied_hash
+    applied_hash=$(ports_file_content_hash "${worktree_path}/.yolo/ports")
+    update_ports_stored_hash "${worktree_path}/.yolo/ports" "$applied_hash"
+  fi
 
   exec "${docker_args[@]}"
 }
@@ -1983,8 +2184,38 @@ main() {
   local running
   running=$(find_running_container "$hash" || true)
   if [[ -n "$running" ]]; then
-    attach_to_container "$running" ${claude_args[@]+"${claude_args[@]}"}
-    return $?
+    local ports_file="${worktree_path}/.yolo/ports"
+    if [[ -f "$ports_file" ]]; then
+      local current_ports_hash stored_ports_hash
+      current_ports_hash=$(ports_file_content_hash "$ports_file")
+      stored_ports_hash=$(get_ports_stored_hash "$ports_file")
+      if [[ -n "$stored_ports_hash" && "$current_ports_hash" != "$stored_ports_hash" ]]; then
+        echo "" >&2
+        warn "Port mappings changed since container started"
+        echo "" >&2
+        echo -e "    ${BOLD}1${RESET}  Reset container with new ports ${DIM}(default)${RESET}" >&2
+        echo -e "    ${BOLD}2${RESET}  Attach anyway (keep existing mappings)" >&2
+        echo "" >&2
+        local ports_choice
+        read -r -p "  Press ENTER to reset, or select [1-2]: " ports_choice >&2
+        case "$ports_choice" in
+          2)
+            warn "Attaching with existing port mappings"
+            ;;
+          *)
+            docker rm -f "$running" >/dev/null 2>&1 || true
+            info "Container removed — recreating with updated ports"
+            running=""
+            ;;
+        esac
+      elif [[ -z "$stored_ports_hash" ]]; then
+        update_ports_stored_hash "$ports_file" "$current_ports_hash"
+      fi
+    fi
+    if [[ -n "$running" ]]; then
+      attach_to_container "$running" ${claude_args[@]+"${claude_args[@]}"}
+      return $?
+    fi
   fi
 
   # Check for stopped container → restart + attach
@@ -2034,7 +2265,7 @@ main() {
   ensure_github_token "$worktree_path"
 
   # Check .yolo/ trust + load config
-  check_yolo_config "$worktree_path"
+  check_yolo_config "$worktree_path" "$trust_yolo"
 
   # Force rebuild if requested
   if [[ "$force_build" == true ]]; then
