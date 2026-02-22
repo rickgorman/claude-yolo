@@ -705,25 +705,6 @@ assert_contains "Trust flag reaches launch" "$output_trust" "Launching Claude Co
 assert_not_contains "Trust flag does not block" "$output_trust" "Refusing to proceed"
 
 
-section "check_yolo_config — --trust-yolo flag"
-
-YOLO_TRUST_FLAG_DIR="$TMPDIR_BASE/yolo-trust-flag"
-mkdir -p "$YOLO_TRUST_FLAG_DIR/.yolo"
-echo "generic" > "$YOLO_TRUST_FLAG_DIR/.yolo/strategy"
-YOLO_TRUST_HOME="$TMPDIR_BASE/yolo-trust-home"
-mkdir -p "$YOLO_TRUST_HOME/.claude"
-
-YOLO_CONFIG_LOADED=false
-trust_yolo=true
-HOME="$YOLO_TRUST_HOME" check_yolo_config "$YOLO_TRUST_FLAG_DIR" 2>/dev/null
-assert_eq "check_yolo_config sets YOLO_CONFIG_LOADED with --trust-yolo" "true" "$YOLO_CONFIG_LOADED"
-
-# Verify trust file was created
-if [[ -f "$YOLO_TRUST_HOME/.claude/.yolo-trusted" ]]; then
-  pass "Trust file created by check_yolo_config"
-else
-  fail "Trust file not created by check_yolo_config"
-fi
 
 
 section "--reset flag"
@@ -798,6 +779,10 @@ assert_contains "--reset is parsed before --strategy error" "$output_reset_parse
 
 section "--trust-yolo arg parsing"
 
+TRUST_YOLO_DIR="$TMPDIR_BASE/trust-yolo-test-dir"
+mkdir -p "$TRUST_YOLO_DIR/.yolo"
+echo "generic" > "$TRUST_YOLO_DIR/.yolo/strategy"
+
 output_trust_yolo=$(bash -c '
   export GH_TOKEN=test_token_for_ci
   docker() {
@@ -827,7 +812,7 @@ output_trust_yolo=$(bash -c '
     esac
   }
   export -f curl
-  cd "'"$YOLO_ENV_DIR"'"
+  cd "'"$TRUST_YOLO_DIR"'"
   HOME="'"$TMPDIR_BASE/trust-yolo-test-home"'"
   mkdir -p "$HOME/.claude"
   echo '"'"'{"claudeAiOauth":{"accessToken":"fake-test-token"}}'"'"' > "$HOME/.claude/.credentials.json"

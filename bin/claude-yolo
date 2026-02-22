@@ -468,7 +468,7 @@ update_ports_stored_hash() {
   local tmp
   tmp=$(mktemp)
   # Remove old hash comment and WARNING comment if present
-  grep -Ev '^# _(yolo_hash|WARNING):' "$ports_file" > "$tmp" || true
+  grep -Ev '^# (_yolo_hash|WARNING):' "$ports_file" > "$tmp" || true
   # Add hash with warning at top of file
   {
     echo "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"

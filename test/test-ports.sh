@@ -698,8 +698,8 @@ echo "9000:9000" > "$WARN_TEST_FILE"
 update_ports_stored_hash "$WARN_TEST_FILE" "test123"
 warn_content=$(cat "$WARN_TEST_FILE")
 # Extract line numbers
-warn_line=$(grep -n "WARNING" "$WARN_TEST_FILE" | cut -d: -f1)
-hash_line=$(grep -n "_yolo_hash" "$WARN_TEST_FILE" | cut -d: -f1)
+warn_line=$(grep -n "^# WARNING:" "$WARN_TEST_FILE" | cut -d: -f1)
+hash_line=$(grep -n "^# _yolo_hash:" "$WARN_TEST_FILE" | cut -d: -f1)
 if [[ "$warn_line" -lt "$hash_line" ]]; then
   pass "WARNING appears before hash comment"
 else
