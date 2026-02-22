@@ -840,6 +840,13 @@ prompt_git_user_config() {
   local user_name="$1"
   local user_email="$2"
 
+  # Skip prompting in non-interactive mode
+  if [[ ! -t 0 ]]; then
+    [[ -n "$user_name" ]] && echo "user.name=$user_name"
+    [[ -n "$user_email" ]] && echo "user.email=$user_email"
+    return 0
+  fi
+
   echo "" >&2
   warn "Git user configuration needed for commits"
   echo "" >&2
