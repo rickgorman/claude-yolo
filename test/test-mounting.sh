@@ -89,7 +89,7 @@ section "Session history persists to host"
 # .claude should be bind-mounted from host, not a named Docker volume
 assert_contains "Bind-mounts host .claude into container" "$docker_args" ".claude:/home/claude/.claude"
 assert_not_contains "Does not use named volume for .claude" "$docker_args" "-home:/home/claude/.claude"
-assert_contains "Mounts per-project session directory" "$docker_args" "yolo-sessions/"
+assert_contains "Mounts per-project session directory" "$docker_args" "/.claude/projects/"
 assert_contains "Session dir targets -workspace" "$docker_args" ":/home/claude/.claude/projects/-workspace"
 
 ########################################

@@ -1594,9 +1594,11 @@ run_with_strategy() {
 
   # Isolate Claude sessions per project — each worktree gets its own
   # session directory so containers don't resume each other's conversations.
-  local session_dir="${HOME}/.claude/yolo-sessions/${hash}"
+  # We store directly in the native Claude project dir (same path encoding the
+  # host uses), so sessions are immediately visible to `claude --resume` without
+  # any migration step.
+  local session_dir="${HOME}/.claude/projects/${worktree_path//\//-}"
   mkdir -p "$session_dir"
-  echo "$worktree_path" > "${session_dir}/.worktree-path"
 
   local -a docker_args=(
     docker run ${tty_flags[@]+"${tty_flags[@]}"}
@@ -1918,14 +1920,6 @@ CDPJSON
     ) &
     disown
   fi
-
-  # After the session ends, migrate completed yolo sessions back to the
-  # proper Claude project dirs so they are visible to `claude --resume`.
-  (
-    while kill -0 $$ 2>/dev/null; do sleep 1; done
-    migrate_yolo_sessions 2>/dev/null || true
-  ) &
-  disown
 
   # Auto-generate .yolo/ports with syntax comment when .yolo/ is trusted but no ports file exists
   local yolo_dir="${worktree_path}/.yolo"
