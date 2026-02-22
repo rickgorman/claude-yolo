@@ -1560,6 +1560,7 @@ assert_contains "Android docker run uses android image" "$android_exec_cmd" "cla
 section "--chrome calls ensure_chrome"
 
 # If curl (CDP check) fails and start-chrome.sh is missing/fails, --chrome should error
+# YOLO_CHROME_BINARY="" prevents real Chrome from launching (avoids macOS keychain popup)
 output_no_cdp=$(bash -c '
   '"$_chrome_mock_prefix"'
   # GitHub API succeeds, CDP check fails
@@ -1570,6 +1571,7 @@ output_no_cdp=$(bash -c '
     esac
   }
   export -f curl
+  export YOLO_CHROME_BINARY=
   cd "'"$RAILS_DIR"'"
   bash "'"$CLI"'" --yolo --chrome --strategy rails 2>&1
 ' 2>&1 || true)
@@ -3209,6 +3211,257 @@ if [[ "$(uname)" == "Darwin" ]]; then
 else
   pass "Skipped headless port conflict test (Linux uses --network=host)"
 fi
+
+########################################
+# Tests: ports_file_content_hash
+########################################
+
+section "ports_file_content_hash"
+
+PORTS_HASH_TMPDIR="$TMPDIR_BASE/ports-hash-tests"
+mkdir -p "$PORTS_HASH_TMPDIR"
+
+cat > "$PORTS_HASH_TMPDIR/ports-base" << 'EOF'
+3011:3000
+5177:5173
+EOF
+
+_phash=$(ports_file_content_hash "$PORTS_HASH_TMPDIR/ports-base")
+assert_match "ports_file_content_hash returns a hex hash" "$_phash" '^[a-f0-9]+'
+
+_phash2=$(ports_file_content_hash "$PORTS_HASH_TMPDIR/ports-base")
+assert_eq "ports_file_content_hash is deterministic" "$_phash" "$_phash2"
+
+# Comments and blank lines must not affect the hash
+cat > "$PORTS_HASH_TMPDIR/ports-with-noise" << EOF
+# _yolo_hash: deadbeef
+# a comment
+
+3011:3000
+
+5177:5173
+EOF
+_phash_noise=$(ports_file_content_hash "$PORTS_HASH_TMPDIR/ports-with-noise")
+assert_eq "ports_file_content_hash ignores comments and blank lines" "$_phash" "$_phash_noise"
+
+# Different mappings must produce a different hash
+cat > "$PORTS_HASH_TMPDIR/ports-different" << 'EOF'
+4000:3000
+EOF
+_phash_diff=$(ports_file_content_hash "$PORTS_HASH_TMPDIR/ports-different")
+if [[ "$_phash" != "$_phash_diff" ]]; then
+  pass "ports_file_content_hash differs for different mappings"
+else
+  fail "ports_file_content_hash should differ for different mappings (both: $_phash)"
+fi
+
+# Comment-only file → "empty" sentinel
+echo "# just a comment" > "$PORTS_HASH_TMPDIR/ports-comment-only"
+_phash_empty=$(ports_file_content_hash "$PORTS_HASH_TMPDIR/ports-comment-only")
+assert_eq "ports_file_content_hash returns 'empty' for comment-only file" "empty" "$_phash_empty"
+
+########################################
+# Tests: get_ports_stored_hash
+########################################
+
+section "get_ports_stored_hash"
+
+cat > "$PORTS_HASH_TMPDIR/ports-stored" << 'EOF'
+# _yolo_hash: abc123def456789a
+3011:3000
+5177:5173
+EOF
+_stored=$(get_ports_stored_hash "$PORTS_HASH_TMPDIR/ports-stored")
+assert_eq "get_ports_stored_hash reads the stored hash" "abc123def456789a" "$_stored"
+
+cat > "$PORTS_HASH_TMPDIR/ports-no-hash-line" << 'EOF'
+# just a comment
+3011:3000
+EOF
+_stored_none=$(get_ports_stored_hash "$PORTS_HASH_TMPDIR/ports-no-hash-line")
+assert_eq "get_ports_stored_hash returns empty when no hash line" "" "$_stored_none"
+
+########################################
+# Tests: update_ports_stored_hash
+########################################
+
+section "update_ports_stored_hash"
+
+cat > "$PORTS_HASH_TMPDIR/ports-to-update" << 'EOF'
+3011:3000
+5177:5173
+EOF
+update_ports_stored_hash "$PORTS_HASH_TMPDIR/ports-to-update" "newhash12345678"
+_updated=$(get_ports_stored_hash "$PORTS_HASH_TMPDIR/ports-to-update")
+assert_eq "update_ports_stored_hash writes hash comment" "newhash12345678" "$_updated"
+
+_content=$(grep -v '^#' "$PORTS_HASH_TMPDIR/ports-to-update" | grep -v '^[[:space:]]*$')
+assert_contains "update_ports_stored_hash preserves port lines" "$_content" "3011:3000"
+assert_contains "update_ports_stored_hash preserves port lines" "$_content" "5177:5173"
+
+# A second update must replace the existing hash line, not append a duplicate
+update_ports_stored_hash "$PORTS_HASH_TMPDIR/ports-to-update" "newhash99999999"
+_hash_line_count=$(grep -c '^# _yolo_hash:' "$PORTS_HASH_TMPDIR/ports-to-update")
+assert_eq "update_ports_stored_hash replaces existing hash (no duplicates)" "1" "$_hash_line_count"
+
+########################################
+# Fixtures: ports hash — good hash and bad hash
+########################################
+
+# Good-hash: the stored _yolo_hash matches the actual port mappings
+PORTS_GOOD_DIR="$TMPDIR_BASE/rails-ports-good-hash"
+mkdir -p "$PORTS_GOOD_DIR/config" "$PORTS_GOOD_DIR/bin" "$PORTS_GOOD_DIR/.yolo"
+echo "gem 'rails'" > "$PORTS_GOOD_DIR/Gemfile"
+echo "# app" > "$PORTS_GOOD_DIR/config/application.rb"
+echo "3.3.0" > "$PORTS_GOOD_DIR/.ruby-version"
+echo "#!/bin/bash" > "$PORTS_GOOD_DIR/bin/rails"
+cat > "$PORTS_GOOD_DIR/.yolo/ports" << 'EOF'
+3011:3000
+5177:5173
+EOF
+_good_ports_hash=$(ports_file_content_hash "$PORTS_GOOD_DIR/.yolo/ports")
+update_ports_stored_hash "$PORTS_GOOD_DIR/.yolo/ports" "$_good_ports_hash"
+
+# Bad-hash: stored _yolo_hash is stale (simulates user editing the file while container runs)
+PORTS_BAD_DIR="$TMPDIR_BASE/rails-ports-bad-hash"
+mkdir -p "$PORTS_BAD_DIR/config" "$PORTS_BAD_DIR/bin" "$PORTS_BAD_DIR/.yolo"
+echo "gem 'rails'" > "$PORTS_BAD_DIR/Gemfile"
+echo "# app" > "$PORTS_BAD_DIR/config/application.rb"
+echo "3.3.0" > "$PORTS_BAD_DIR/.ruby-version"
+echo "#!/bin/bash" > "$PORTS_BAD_DIR/bin/rails"
+cat > "$PORTS_BAD_DIR/.yolo/ports" << 'EOF'
+# _yolo_hash: deadbeefdeadbeef
+3011:3000
+5177:5173
+EOF
+
+########################################
+# Tests: ports hash detection — good hash
+########################################
+
+section "ports hash detection — good hash (no reset prompt)"
+
+_good_ports_path=$(cd "$PORTS_GOOD_DIR" && pwd)
+_good_ports_id=$(path_hash "$_good_ports_path")
+
+output_ports_good=$(bash -c '
+  export HOME="'"$CLI_HOME"'"
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps)
+        if [[ "$*" == *"status=exited"* ]]; then
+          echo ""
+        else
+          echo "claude-yolo-'"$_good_ports_id"'-rails"
+        fi
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f docker
+  cd "'"$PORTS_GOOD_DIR"'"
+  bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_not_contains "Good hash: no port-changed warning" "$output_ports_good" "Port mappings changed"
+assert_contains "Good hash: attaches to running container" "$output_ports_good" "Attaching"
+
+########################################
+# Tests: ports hash detection — bad hash
+########################################
+
+section "ports hash detection — bad hash (port mappings changed)"
+
+_bad_ports_path=$(cd "$PORTS_BAD_DIR" && pwd)
+_bad_ports_id=$(path_hash "$_bad_ports_path")
+
+# Press ENTER (default) → reset container
+output_ports_bad_reset=$(echo "" | bash -c '
+  export HOME="'"$CLI_HOME"'"
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps)
+        if [[ "$*" == *"status=exited"* ]]; then
+          echo ""
+        else
+          echo "claude-yolo-'"$_bad_ports_id"'-rails"
+        fi
+        ;;
+      rm) return 0 ;;
+      image)
+        shift
+        case "$1" in
+          inspect) return 0 ;;
+          *) return 1 ;;
+        esac
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      run) echo "EXEC_CMD: docker run $*"; exit 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f docker
+  lsof() { return 1; }
+  export -f lsof
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$PORTS_BAD_DIR"'"
+  bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "Bad hash: warns about port mapping change" "$output_ports_bad_reset" "Port mappings changed"
+assert_contains "Bad hash: offers reset option" "$output_ports_bad_reset" "Reset container"
+assert_contains "Bad hash + reset: removes and recreates container" "$output_ports_bad_reset" "recreating with updated ports"
+
+# The reset test ran update_ports_stored_hash before exec — restore the stale hash
+cat > "$PORTS_BAD_DIR/.yolo/ports" << 'EOF'
+# _yolo_hash: deadbeefdeadbeef
+3011:3000
+5177:5173
+EOF
+
+# Option "2" → attach anyway, keep old mappings
+output_ports_bad_keep=$(echo "2" | bash -c '
+  export HOME="'"$CLI_HOME"'"
+  export GH_TOKEN=test_token_for_ci
+  exec() { echo "EXEC_CMD: $*"; command exit 0; }
+  export -f exec
+  docker() {
+    case "$1" in
+      info) return 0 ;;
+      ps)
+        if [[ "$*" == *"status=exited"* ]]; then
+          echo ""
+        else
+          echo "claude-yolo-'"$_bad_ports_id"'-rails"
+        fi
+        ;;
+      inspect) echo "2099-01-01T00:00:00.000Z" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f docker
+  cd "'"$PORTS_BAD_DIR"'"
+  bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "Bad hash + keep: warns about port mapping change" "$output_ports_bad_keep" "Port mappings changed"
+assert_contains "Bad hash + keep: attaches to existing container" "$output_ports_bad_keep" "Attaching"
+assert_not_contains "Bad hash + keep: does not recreate container" "$output_ports_bad_keep" "recreating"
 
 ########################################
 # Summary

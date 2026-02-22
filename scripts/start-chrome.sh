@@ -8,7 +8,16 @@ CDP_PORT="${CDP_PORT:-9222}"
 PID_FILE="${TMPDIR:-/tmp}/claude-yolo-chrome-${CDP_PORT}.pid"
 
 # Detect Chrome path based on OS
+# YOLO_CHROME_BINARY="" disables Chrome detection (used in tests to prevent real launches)
 detect_chrome() {
+  if [[ -v YOLO_CHROME_BINARY ]]; then
+    if [[ -n "$YOLO_CHROME_BINARY" && -x "$YOLO_CHROME_BINARY" ]]; then
+      echo "$YOLO_CHROME_BINARY"
+      return 0
+    fi
+    return 1
+  fi
+
   local paths=(
     # macOS
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

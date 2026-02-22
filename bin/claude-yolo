@@ -437,6 +437,42 @@ resolve_port_conflicts() {
 }
 
 ########################################
+# .yolo/ports change detection
+########################################
+
+ports_file_content_hash() {
+  local ports_file="$1"
+  local content
+  content=$(grep -Ev '^\s*(#|$)' "$ports_file" 2>/dev/null || true)
+  if [[ -z "$content" ]]; then
+    echo "empty"
+    return 0
+  fi
+  if command -v md5 &>/dev/null; then
+    printf '%s' "$content" | md5 | cut -c1-16
+  elif command -v md5sum &>/dev/null; then
+    printf '%s' "$content" | md5sum | cut -c1-16
+  else
+    printf '%s' "$content" | shasum | cut -c1-16
+  fi
+}
+
+get_ports_stored_hash() {
+  local ports_file="$1"
+  grep '^# _yolo_hash:' "$ports_file" 2>/dev/null | head -1 | sed 's/^# _yolo_hash:[[:space:]]*//' || true
+}
+
+update_ports_stored_hash() {
+  local ports_file="$1"
+  local new_hash="$2"
+  local tmp
+  tmp=$(mktemp)
+  grep -v '^# _yolo_hash:' "$ports_file" > "$tmp" || true
+  { echo "# _yolo_hash: ${new_hash}"; cat "$tmp"; } > "$ports_file"
+  rm -f "$tmp"
+}
+
+########################################
 # Chrome CDP (used by multiple strategies)
 ########################################
 
@@ -1739,6 +1775,13 @@ CDPJSON
   ) &
   disown
 
+  # Record the applied ports hash so future runs can detect changes
+  if [[ -f "${worktree_path}/.yolo/ports" ]]; then
+    local applied_hash
+    applied_hash=$(ports_file_content_hash "${worktree_path}/.yolo/ports")
+    update_ports_stored_hash "${worktree_path}/.yolo/ports" "$applied_hash"
+  fi
+
   exec "${docker_args[@]}"
 }
 
@@ -1983,8 +2026,36 @@ main() {
   local running
   running=$(find_running_container "$hash" || true)
   if [[ -n "$running" ]]; then
-    attach_to_container "$running" ${claude_args[@]+"${claude_args[@]}"}
-    return $?
+    local ports_file="${worktree_path}/.yolo/ports"
+    if [[ -f "$ports_file" ]]; then
+      local current_ports_hash stored_ports_hash
+      current_ports_hash=$(ports_file_content_hash "$ports_file")
+      stored_ports_hash=$(get_ports_stored_hash "$ports_file")
+      if [[ -n "$stored_ports_hash" && "$current_ports_hash" != "$stored_ports_hash" ]]; then
+        echo "" >&2
+        warn "Port mappings changed since container started"
+        echo "" >&2
+        echo -e "    ${BOLD}1${RESET}  Reset container with new ports ${DIM}(default)${RESET}" >&2
+        echo -e "    ${BOLD}2${RESET}  Attach anyway (keep existing mappings)" >&2
+        echo "" >&2
+        local ports_choice
+        read -r -p "  Press ENTER to reset, or select [1-2]: " ports_choice >&2
+        case "$ports_choice" in
+          2)
+            warn "Attaching with existing port mappings"
+            ;;
+          *)
+            docker rm -f "$running" >/dev/null 2>&1 || true
+            info "Container removed — recreating with updated ports"
+            running=""
+            ;;
+        esac
+      fi
+    fi
+    if [[ -n "$running" ]]; then
+      attach_to_container "$running" ${claude_args[@]+"${claude_args[@]}"}
+      return $?
+    fi
   fi
 
   # Check for stopped container → restart + attach
