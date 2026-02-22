@@ -500,6 +500,9 @@ env_docker_args=$(cat "$ENV_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains "--env injects MY_VAR" "$env_docker_args" "MY_VAR=hello"
 assert_contains "--env injects OTHER_VAR" "$env_docker_args" "OTHER_VAR=world"
 
+# Cleanup mocks
+rm -f "$MOCK_BIN/uname"
+
 
 section "--env without value shows error"
 
@@ -559,6 +562,9 @@ assert_contains "--env-file strips double quotes" "$envfile_docker_args" "QUOTED
 assert_contains "--env-file strips single quotes" "$envfile_docker_args" "SINGLE_QUOTED=single_value"
 assert_not_contains "--env-file skips comments" "$envfile_docker_args" "This is a comment"
 
+# Cleanup mocks
+rm -f "$MOCK_BIN/uname"
+
 
 section "--env-file with missing file shows error"
 
@@ -604,6 +610,9 @@ output=$(cd "$RAILS_DIR" && \
 combined_docker_args=$(cat "$ENV_COMBINED_LOG" 2>/dev/null || echo "")
 assert_contains "Combined: --env var present" "$combined_docker_args" "INLINE_VAR=inline"
 assert_contains "Combined: --env-file var present" "$combined_docker_args" "API_KEY=secret123"
+
+# Cleanup mocks
+rm -f "$MOCK_BIN/uname"
 
 ########################################
 # Tests: -p / --print headless mode

@@ -186,6 +186,9 @@ assert_contains ".yolo/env injects ANOTHER_VAR" "$yolo_env_docker_args" "ANOTHER
 assert_contains ".yolo/env strips quotes" "$yolo_env_docker_args" "QUOTED_VAR=quoted_value"
 assert_not_contains ".yolo/env skips comments" "$yolo_env_docker_args" "Comment line"
 
+# Cleanup mocks
+rm -f "$MOCK_BIN/uname"
+
 ########################################
 # Tests: .yolo/env not loaded without trust
 ########################################
@@ -333,6 +336,9 @@ output=$(cd "$YOLO_DOCKERFILE_DIR" && \
 yolo_dockerfile_log=$(cat "$YOLO_DOCKERFILE_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains ".yolo/Dockerfile triggers project image build" "$output" "Building project image"
 assert_contains ".yolo/Dockerfile build uses -f flag" "$yolo_dockerfile_log" ".yolo/Dockerfile"
+
+# Cleanup mocks
+rm -f "$MOCK_BIN/uname"
 
 ########################################
 # Tests: --setup-token flag parsing
