@@ -232,6 +232,75 @@ claude-yolo --yolo  # Prompts for review first
 - Container escape exploits
 - Docker daemon vulnerabilities
 
+## Automated Security Scanning
+
+### Dependency Vulnerability Scanning
+
+The project uses multiple automated tools to scan for vulnerabilities:
+
+**1. Dependabot** (`.github/dependabot.yml`)
+- Weekly scans for Go modules, GitHub Actions, and Docker base images
+- Automatically creates PRs for dependency updates
+- Monitors security advisories for known vulnerabilities
+
+**2. govulncheck** (`.github/workflows/security.yml`)
+- Official Go vulnerability scanner
+- Checks Go dependencies against the vulnerability database
+- Runs on every push and PR, plus weekly scheduled scans
+
+**3. Nancy** (`.github/workflows/security.yml`)
+- OSS Index vulnerability scanner from Sonatype
+- Cross-references dependencies against known CVEs
+- Provides detailed vulnerability reports
+
+**4. Trivy** (`.github/workflows/security.yml`)
+- Comprehensive security scanner for filesystems and containers
+- Scans for vulnerabilities, misconfigurations, and secrets
+- Uploads results to GitHub Security tab
+- Focuses on CRITICAL and HIGH severity issues
+
+**5. CodeQL** (`.github/workflows/security.yml`)
+- GitHub's semantic code analysis engine
+- Scans Go code for security vulnerabilities
+- Detects common bug patterns and security issues
+- Results visible in Security tab
+
+### Viewing Security Alerts
+
+**GitHub Security Tab**:
+```
+https://github.com/rickgorman/claude-yolo/security
+```
+
+Shows:
+- Dependabot alerts
+- Code scanning alerts (CodeQL, Trivy)
+- Secret scanning alerts
+
+**Security Workflow Status**:
+```
+https://github.com/rickgorman/claude-yolo/actions/workflows/security.yml
+```
+
+### Responding to Vulnerabilities
+
+When a vulnerability is detected:
+
+1. **Review the Alert**: Check GitHub Security tab for details
+2. **Assess Impact**: Determine if the vulnerability affects your usage
+3. **Update Dependencies**:
+   ```bash
+   go get -u github.com/vulnerable/package
+   go mod tidy
+   ```
+4. **Test**: Run full test suite to ensure no breakage
+5. **Commit**: Create PR with security fix
+
+**For Critical Vulnerabilities**:
+- Merge Dependabot PRs immediately
+- Create hotfix branch if needed
+- Notify users via GitHub releases
+
 ## Security Disclosures
 
 If you discover a security vulnerability in claude-yolo, please report it via:
@@ -242,8 +311,12 @@ Please do not open public issues for security vulnerabilities.
 
 ## Changelog
 
-- **2025-02-22**: Initial security audit (v2.0.0-dev)
+- **2025-02-22**: Security infrastructure and audit (v2.0.0-dev)
+  - ✅ Initial security audit completed
+  - ✅ Implemented automated dependency scanning (Dependabot, govulncheck, Nancy, Trivy)
+  - ✅ Added CodeQL static analysis
+  - ✅ Fixed trust file permissions (0644 → 0600)
   - Analyzed command injection risks: ✅ Secure
   - Analyzed credential handling: ✅ Secure with recommendations
-  - Analyzed file permissions: ⚠️ Improvements recommended
+  - Analyzed file permissions: ✅ Fixed
   - Analyzed Docker isolation: ✅ Secure with documentation needed
