@@ -168,6 +168,12 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/docker"
 
+cat > "$MOCK_BIN/uname" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "Darwin"
+MOCKEOF
+chmod +x "$MOCK_BIN/uname"
+
 output=$(cd "$YOLO_ENV_DIR" && \
   HOME="$YOLO_ENV_TRUST_DIR" \
   GH_TOKEN="test_token_for_ci" \
@@ -311,6 +317,12 @@ case "\$1" in
 esac
 MOCKEOF
 chmod +x "$MOCK_BIN/docker"
+
+cat > "$MOCK_BIN/uname" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "Darwin"
+MOCKEOF
+chmod +x "$MOCK_BIN/uname"
 
 output=$(cd "$YOLO_DOCKERFILE_DIR" && \
   HOME="$YOLO_DOCKERFILE_HOME" \

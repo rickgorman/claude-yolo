@@ -484,6 +484,12 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/docker"
 
+cat > "$MOCK_BIN/uname" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "Darwin"
+MOCKEOF
+chmod +x "$MOCK_BIN/uname"
+
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
@@ -533,6 +539,12 @@ esac
 MOCKEOF
 chmod +x "$MOCK_BIN/docker"
 
+cat > "$MOCK_BIN/uname" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "Darwin"
+MOCKEOF
+chmod +x "$MOCK_BIN/uname"
+
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
@@ -576,6 +588,12 @@ case "\$1" in
 esac
 MOCKEOF
 chmod +x "$MOCK_BIN/docker"
+
+cat > "$MOCK_BIN/uname" << 'MOCKEOF'
+#!/usr/bin/env bash
+echo "Darwin"
+MOCKEOF
+chmod +x "$MOCK_BIN/uname"
 
 output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \

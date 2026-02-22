@@ -623,6 +623,8 @@ bash -c '
     esac
   }
   export -f curl
+  uname() { echo "Darwin"; }
+  export -f uname
   cd "'"$PORTS_AUTO_GEN_DIR"'"
   bash "'"$CLI"'" --yolo --trust-yolo --strategy rails 2>&1
 ' >/dev/null 2>&1 || true
