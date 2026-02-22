@@ -467,8 +467,14 @@ update_ports_stored_hash() {
   local new_hash="$2"
   local tmp
   tmp=$(mktemp)
-  grep -v '^# _yolo_hash:' "$ports_file" > "$tmp" || true
-  { echo "# _yolo_hash: ${new_hash}"; cat "$tmp"; } > "$ports_file"
+  # Remove old hash comment and WARNING comment if present
+  grep -Ev '^# _(yolo_hash|WARNING):' "$ports_file" > "$tmp" || true
+  # Add hash with warning at top of file
+  {
+    echo "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"
+    echo "# _yolo_hash: ${new_hash}"
+    cat "$tmp"
+  } > "$ports_file"
   rm -f "$tmp"
 }
 

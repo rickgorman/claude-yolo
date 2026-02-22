@@ -650,8 +650,70 @@ _auto_gen_hash=$(get_ports_stored_hash "$PORTS_AUTO_GEN_DIR/.yolo/ports")
 assert_not_contains "Auto-gen: hash written to new ports file" "" "$_auto_gen_hash"
 
 ########################################
-# Git user config extraction
+# Hash auto-regeneration
 ########################################
 
+section "update_ports_stored_hash adds WARNING comment"
+
+HASH_TEST_FILE="$TMPDIR_BASE/hash-test-ports"
+echo "3000:3000" > "$HASH_TEST_FILE"
+update_ports_stored_hash "$HASH_TEST_FILE" "abc123"
+hash_content=$(cat "$HASH_TEST_FILE")
+assert_contains "Hash update adds WARNING" "$hash_content" "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"
+assert_contains "Hash update adds hash comment" "$hash_content" "# _yolo_hash: abc123"
+assert_contains "Hash update preserves port mappings" "$hash_content" "3000:3000"
+
+section "update_ports_stored_hash replaces existing hash"
+
+# File already has a hash
+echo "# _yolo_hash: oldh ash123" > "$HASH_TEST_FILE"
+echo "8080:8080" >> "$HASH_TEST_FILE"
+update_ports_stored_hash "$HASH_TEST_FILE" "newhash456"
+hash_content=$(cat "$HASH_TEST_FILE")
+assert_contains "Hash replacement adds WARNING" "$hash_content" "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"
+assert_contains "Hash replacement updates hash" "$hash_content" "# _yolo_hash: newhash456"
+assert_not_contains "Hash replacement removes old hash" "$hash_content" "oldhash123"
+assert_contains "Hash replacement preserves ports" "$hash_content" "8080:8080"
+
+section "Hash regeneration when comment removed"
+
+# Create ports file without hash
+NO_HASH_FILE="$TMPDIR_BASE/no-hash-ports"
+cat > "$NO_HASH_FILE" << 'EOF'
+# Port mappings: host_port:container_port
+3000:3000
+5173:5173
+EOF
+
+# get_ports_stored_hash should return empty
+stored_hash=$(get_ports_stored_hash "$NO_HASH_FILE")
+assert_eq "Missing hash returns empty" "" "$stored_hash"
+
+# Regenerate hash
+current_hash=$(ports_file_content_hash "$NO_HASH_FILE")
+update_ports_stored_hash "$NO_HASH_FILE" "$current_hash"
+
+# Verify hash was added
+regenerated_content=$(cat "$NO_HASH_FILE")
+assert_contains "Regenerated file has WARNING" "$regenerated_content" "# WARNING: Do not modify the _yolo_hash comment - it is auto-generated"
+assert_contains "Regenerated file has hash" "$regenerated_content" "# _yolo_hash:"
+assert_contains "Regenerated file preserves ports" "$regenerated_content" "3000:3000"
+assert_contains "Regenerated file preserves ports" "$regenerated_content" "5173:5173"
+
+section "WARNING comment placement"
+
+# Verify WARNING comes before hash
+WARN_TEST_FILE="$TMPDIR_BASE/warn-test-ports"
+echo "9000:9000" > "$WARN_TEST_FILE"
+update_ports_stored_hash "$WARN_TEST_FILE" "test123"
+warn_content=$(cat "$WARN_TEST_FILE")
+# Extract line numbers
+warn_line=$(grep -n "WARNING" "$WARN_TEST_FILE" | cut -d: -f1)
+hash_line=$(grep -n "_yolo_hash" "$WARN_TEST_FILE" | cut -d: -f1)
+if [[ "$warn_line" -lt "$hash_line" ]]; then
+  pass "WARNING appears before hash comment"
+else
+  fail "WARNING appears before hash comment (WARNING on line $warn_line, hash on line $hash_line)"
+fi
 
 print_summary "$(basename "$0" .sh)"
