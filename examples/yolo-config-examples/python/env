@@ -1,0 +1,10 @@
+# Python environment
+PYTHONUNBUFFERED=1
+PYTHONDONTWRITEBYTECODE=1
+
+# Application settings
+DEBUG=True
+LOG_LEVEL=INFO
+
+# Database
+DATABASE_URL=postgresql://localhost/myapp

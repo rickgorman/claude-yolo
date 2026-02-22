@@ -1,0 +1,17 @@
+# Rails application
+3000:3000
+
+# PostgreSQL database
+5432:5432
+
+# Redis cache/Sidekiq
+6379:6379
+
+# ElasticSearch
+9200:9200
+
+# MailCatcher SMTP
+1025:1025
+
+# MailCatcher web interface
+1080:1080
