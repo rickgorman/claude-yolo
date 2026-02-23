@@ -18,9 +18,7 @@ func Run(strategy string, args []string) error {
 
 	// Fix volume permissions if running as root
 	if os.Getuid() == 0 {
-		if err := fixVolumePermissions(strategy, log); err != nil {
-			return fmt.Errorf("failed to fix permissions: %w", err)
-		}
+		fixVolumePermissions(strategy, log)
 
 		// Create .gitconfig from environment variables
 		if err := createGitConfig(log); err != nil {
@@ -55,7 +53,7 @@ func Run(strategy string, args []string) error {
 }
 
 // fixVolumePermissions fixes ownership on Docker volumes
-func fixVolumePermissions(strategy string, _ func(string)) error {
+func fixVolumePermissions(strategy string, _ func(string)) {
 	claudeUID := 1000 // claude user UID
 	claudeGID := 1000 // claude group GID
 
@@ -96,8 +94,6 @@ func fixVolumePermissions(strategy string, _ func(string)) error {
 			})
 		}
 	}
-
-	return nil
 }
 
 // createGitConfig creates .gitconfig from environment variables

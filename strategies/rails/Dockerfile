@@ -103,10 +103,12 @@ ENV BUNDLE_BIN="/home/claude/.gems/bin"
 
 WORKDIR /workspace
 
+# Switch to root for entrypoint setup
+USER root
+
 # Entrypoint (runs as root to fix volume permissions, then drops to claude)
 COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
-USER root
 ENTRYPOINT ["/usr/local/bin/entrypoint", "rails"]
 CMD ["claude"]

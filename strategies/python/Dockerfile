@@ -96,9 +96,10 @@ ENV PATH="/home/claude/.pyenv/bin:/home/claude/.pyenv/shims:$PATH"
 WORKDIR /workspace
 
 # Entrypoint (runs as root to fix volume permissions, then drops to claude)
+USER root
+
 COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
-USER root
 ENTRYPOINT ["/usr/local/bin/entrypoint", "python"]
 CMD ["claude"]

@@ -99,9 +99,10 @@ ENV BUNDLE_BIN="/home/claude/.gems/bin"
 WORKDIR /workspace
 
 # Entrypoint (runs as root to fix volume permissions, then drops to claude)
+USER root
+
 COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
-USER root
 ENTRYPOINT ["/usr/local/bin/entrypoint", "jekyll"]
 CMD ["claude"]

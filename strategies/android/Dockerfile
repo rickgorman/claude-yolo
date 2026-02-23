@@ -81,6 +81,8 @@ RUN aapt2 version && adb version
 WORKDIR /workspace
 
 # Entrypoint
+USER root
+
 COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
