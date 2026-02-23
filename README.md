@@ -21,9 +21,31 @@ Run Claude Code in isolated, project-specific Docker containers with automatic e
 
 ## 📦 Installation
 
-### Quick Install (Recommended)
+### Prerequisites
 
-**Prerequisites**: Go 1.24+ and Docker
+**Required:**
+- **Go 1.24+** - [Download from go.dev](https://go.dev/dl/)
+- **Docker** - [Download from docker.com](https://docker.com)
+
+**Install Go on macOS:**
+```bash
+# Using Homebrew (recommended)
+brew install go
+
+# Or download from https://go.dev/dl/
+# Then verify:
+go version  # Should show go1.24 or higher
+```
+
+**Install Docker on macOS:**
+```bash
+# Using Homebrew
+brew install --cask docker
+
+# Or download Docker Desktop from https://docker.com
+```
+
+### Quick Install (Recommended)
 
 ```bash
 # Clone the repository
