@@ -24,7 +24,7 @@ jobs:
       - name: Build generic strategy image for testing
         uses: docker/build-push-action@v6
         with:
-          context: strategies/generic/
+          context: .
           file: strategies/generic/Dockerfile
           tags: claude-yolo-generic:latest
           load: true
@@ -34,7 +34,7 @@ jobs:
       - name: Build rails strategy image for testing
         uses: docker/build-push-action@v6
         with:
-          context: strategies/rails/
+          context: .
           file: strategies/rails/Dockerfile
           tags: claude-yolo-rails:latest
           load: true
