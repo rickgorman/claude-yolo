@@ -44,7 +44,7 @@ func TestFilePathOperations(t *testing.T) {
 		{
 			name:     "with dots",
 			parts:    []string{"home", "..", "other", "file.txt"},
-			wantUnix: "home/../other/file.txt",
+			wantUnix: "other/file.txt", // filepath.Join cleans the path
 		},
 	}
 

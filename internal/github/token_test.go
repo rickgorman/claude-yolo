@@ -18,8 +18,8 @@ func TestFindToken(t *testing.T) {
 	}()
 
 	t.Run("finds GH_TOKEN env var", func(t *testing.T) {
-		os.Setenv("GH_TOKEN", "ghp_from_env")
-		os.Unsetenv("GITHUB_TOKEN")
+		_ = os.Setenv("GH_TOKEN", "ghp_from_env")
+		_ = os.Unsetenv("GITHUB_TOKEN")
 
 		result, err := FindToken("/tmp/test")
 		if err != nil {
@@ -34,8 +34,8 @@ func TestFindToken(t *testing.T) {
 	})
 
 	t.Run("finds GITHUB_TOKEN env var", func(t *testing.T) {
-		os.Unsetenv("GH_TOKEN")
-		os.Setenv("GITHUB_TOKEN", "ghp_from_github_token")
+		_ = os.Unsetenv("GH_TOKEN")
+		_ = os.Setenv("GITHUB_TOKEN", "ghp_from_github_token")
 
 		result, err := FindToken("/tmp/test")
 		if err != nil {
@@ -50,8 +50,8 @@ func TestFindToken(t *testing.T) {
 	})
 
 	t.Run("prefers GH_TOKEN over GITHUB_TOKEN", func(t *testing.T) {
-		os.Setenv("GH_TOKEN", "ghp_from_gh_token")
-		os.Setenv("GITHUB_TOKEN", "ghp_from_github_token")
+		_ = os.Setenv("GH_TOKEN", "ghp_from_gh_token")
+		_ = os.Setenv("GITHUB_TOKEN", "ghp_from_github_token")
 
 		result, err := FindToken("/tmp/test")
 		if err != nil {
@@ -63,8 +63,8 @@ func TestFindToken(t *testing.T) {
 	})
 
 	t.Run("finds token in project .env", func(t *testing.T) {
-		os.Unsetenv("GH_TOKEN")
-		os.Unsetenv("GITHUB_TOKEN")
+		_ = os.Unsetenv("GH_TOKEN")
+		_ = os.Unsetenv("GITHUB_TOKEN")
 
 		tmpDir := t.TempDir()
 		envFile := filepath.Join(tmpDir, ".env")
@@ -86,8 +86,8 @@ func TestFindToken(t *testing.T) {
 	})
 
 	t.Run("finds token in home .env", func(t *testing.T) {
-		os.Unsetenv("GH_TOKEN")
-		os.Unsetenv("GITHUB_TOKEN")
+		_ = os.Unsetenv("GH_TOKEN")
+		_ = os.Unsetenv("GITHUB_TOKEN")
 
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -117,8 +117,8 @@ func TestFindToken(t *testing.T) {
 	})
 
 	t.Run("returns error when no token found", func(t *testing.T) {
-		os.Unsetenv("GH_TOKEN")
-		os.Unsetenv("GITHUB_TOKEN")
+		_ = os.Unsetenv("GH_TOKEN")
+		_ = os.Unsetenv("GITHUB_TOKEN")
 
 		tmpDir := t.TempDir()
 
@@ -198,7 +198,7 @@ func TestGetGHConfigPath(t *testing.T) {
 	defer setOrUnset("XDG_CONFIG_HOME", origXDGConfig)
 
 	t.Run("uses XDG_CONFIG_HOME when set", func(t *testing.T) {
-		os.Setenv("XDG_CONFIG_HOME", "/custom/config")
+		_ = os.Setenv("XDG_CONFIG_HOME", "/custom/config")
 		got := getGHConfigPath()
 		want := "/custom/config/gh/hosts.yml"
 		if got != want {
@@ -207,7 +207,7 @@ func TestGetGHConfigPath(t *testing.T) {
 	})
 
 	t.Run("falls back to ~/.config when XDG_CONFIG_HOME not set", func(t *testing.T) {
-		os.Unsetenv("XDG_CONFIG_HOME")
+		_ = os.Unsetenv("XDG_CONFIG_HOME")
 		got := getGHConfigPath()
 		homeDir, _ := os.UserHomeDir()
 		want := filepath.Join(homeDir, ".config", "gh", "hosts.yml")
@@ -220,8 +220,8 @@ func TestGetGHConfigPath(t *testing.T) {
 // Helper function to set or unset environment variables
 func setOrUnset(key, value string) {
 	if value == "" {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 	} else {
-		os.Setenv(key, value)
+		_ = os.Setenv(key, value)
 	}
 }
