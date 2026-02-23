@@ -92,7 +92,7 @@ jobs:
       - name: Build rails image
         uses: docker/build-push-action@v6
         with:
-          context: strategies/rails/
+          context: .
           file: strategies/rails/Dockerfile
           tags: claude-yolo-rails:test
           load: true
@@ -190,7 +190,7 @@ jobs:
       - name: Build rust image
         uses: docker/build-push-action@v6
         with:
-          context: strategies/rust/
+          context: .
           file: strategies/rust/Dockerfile
           tags: claude-yolo-rust:test
           load: true
@@ -263,7 +263,7 @@ jobs:
       - name: Build python image
         uses: docker/build-push-action@v6
         with:
-          context: strategies/python/
+          context: .
           file: strategies/python/Dockerfile
           tags: claude-yolo-python:test
           load: true
@@ -334,7 +334,7 @@ jobs:
       - name: Build node image
         uses: docker/build-push-action@v6
         with:
-          context: strategies/node/
+          context: .
           file: strategies/node/Dockerfile
           tags: claude-yolo-node:test
           load: true
@@ -411,7 +411,7 @@ jobs:
       - name: Build go image
         uses: docker/build-push-action@v6
         with:
-          context: strategies/go/
+          context: .
           file: strategies/go/Dockerfile
           tags: claude-yolo-go:test
           load: true
