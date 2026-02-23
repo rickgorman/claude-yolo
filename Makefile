@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean test-unit test-integration test-all install-hooks
+.PHONY: build test lint install clean test-unit test-integration test-all install-hooks bench bench-all
 
 # Go binary name
 BINARY=claude-yolo
@@ -63,3 +63,12 @@ cover: test
 install-hooks:
 	@echo "Installing git hooks..."
 	@./.git-hooks/install.sh
+
+# Run benchmarks
+bench:
+	@echo "Running key benchmarks..."
+	@./scripts/benchmark.sh
+
+bench-all:
+	@echo "Running all benchmarks..."
+	@./scripts/benchmark.sh --all
