@@ -158,7 +158,7 @@ func (d *Detector) DetectBestStrategy(projectPath string) (string, error) {
 }
 
 // runDetectScript executes a strategy's detect.sh script and parses the output.
-func runDetectScript(strategiesDir, strategyName, projectPath string) (confidence int, message string, err error) {
+func runDetectScript(strategiesDir, strategyName, projectPath string) (int, string, error) {
 	scriptPath := filepath.Join(strategiesDir, strategyName, "detect.sh")
 
 	// Check if detect.sh exists

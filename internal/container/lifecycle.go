@@ -77,7 +77,7 @@ func (c *Client) Attach(ctx context.Context, containerID string, interactive boo
 	// Handle stdin if interactive
 	if interactive {
 		go func() {
-			_ = io.Copy(hijackedResp.Conn, os.Stdin)
+			_, _ = io.Copy(hijackedResp.Conn, os.Stdin)
 		}()
 	}
 

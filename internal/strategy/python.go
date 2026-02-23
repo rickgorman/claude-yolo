@@ -41,9 +41,6 @@ func (s *PythonStrategy) Volumes(hash string) []VolumeMount {
 // EnvVars returns the environment variables needed for Python.
 func (s *PythonStrategy) EnvVars(projectPath string) ([]EnvVar, error) {
 	pythonVersion := detectPythonVersion(projectPath)
-	if err != nil {
-		return nil, FormatError("python", "detect python version", err)
-	}
 
 	return []EnvVar{
 		{Key: "PYTHON_VERSION", Value: pythonVersion},
@@ -60,9 +57,6 @@ func (s *PythonStrategy) DefaultPorts() []PortMapping {
 // InfoMessage returns the info message to display when starting Python container.
 func (s *PythonStrategy) InfoMessage(projectPath string) (string, error) {
 	pythonVersion := detectPythonVersion(projectPath)
-	if err != nil {
-		return "", FormatError("python", "detect python version", err)
-	}
 
 	return fmt.Sprintf("Python %s · pip", pythonVersion), nil
 }
@@ -87,7 +81,7 @@ func detectPythonVersion(projectPath string) string {
 			if strings.HasPrefix(line, "python ") {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
-					return fields[1], nil
+					return fields[1]
 				}
 			}
 		}
@@ -100,11 +94,11 @@ func detectPythonVersion(projectPath string) string {
 		re := regexp.MustCompile(`requires-python\s*=\s*"?>=?\s*([0-9]+\.[0-9]+)`)
 		for _, line := range lines {
 			if matches := re.FindStringSubmatch(line); len(matches) > 1 {
-				return matches[1], nil
+				return matches[1]
 			}
 		}
 	}
 
 	// Default version
-	return "3.12", nil
+	return "3.12"
 }

@@ -84,7 +84,7 @@ func getPortProcess(port int) (processName string, pid string) {
 		return "", ""
 	}
 
-	pid := strings.TrimSpace(string(output))
+	pid = strings.TrimSpace(string(output))
 	lines := strings.Split(pid, "\n")
 	if len(lines) == 0 || lines[0] == "" {
 		return "", ""
@@ -99,7 +99,7 @@ func getPortProcess(port int) (processName string, pid string) {
 		return "", pid
 	}
 
-	processName := strings.TrimSpace(string(output))
+	processName = strings.TrimSpace(string(output))
 	return processName, pid
 }
 
@@ -156,8 +156,8 @@ func ResolvePortConflicts(portMappings []PortMapping, autoRemap bool) ([]PortMap
 				ui.DimMsg("    %d → %d", c.Port, c.Suggestion)
 			}
 			ui.BlankLine()
-			_ = fmt.Fprintf(ui.Out, "    %s1%s  Remap to suggested ports\n", ui.Bold(""), ui.Dim(""))
-			_ = fmt.Fprintf(ui.Out, "    %s2%s  Continue anyway (docker may fail)\n", ui.Bold(""), ui.Dim(""))
+			_, _ = fmt.Fprintf(ui.Out, "    %s1%s  Remap to suggested ports\n", ui.Bold(""), ui.Dim(""))
+			_, _ = fmt.Fprintf(ui.Out, "    %s2%s  Continue anyway (docker may fail)\n", ui.Bold(""), ui.Dim(""))
 			ui.BlankLine()
 
 			choice := promptChoice("  Press ENTER to remap, or select [1-2]: ")
@@ -204,7 +204,7 @@ func applyPortRemapping(portMappings []PortMapping, conflicts []PortConflict) []
 
 // promptChoice prompts the user for input and returns their choice.
 func promptChoice(prompt string) string {
-	_ = fmt.Fprint(ui.Out, prompt)
+	_, _ = fmt.Fprint(ui.Out, prompt)
 
 	reader := bufio.NewReader(os.Stdin)
 	choice, err := reader.ReadString('\n')

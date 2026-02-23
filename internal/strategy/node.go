@@ -41,9 +41,6 @@ func (s *NodeStrategy) Volumes(hash string) []VolumeMount {
 // EnvVars returns the environment variables needed for Node.
 func (s *NodeStrategy) EnvVars(projectPath string) ([]EnvVar, error) {
 	nodeVersion := detectNodeVersion(projectPath)
-	if err != nil {
-		return nil, FormatError("node", "detect node version", err)
-	}
 
 	return []EnvVar{
 		{Key: "NODE_VERSION", Value: nodeVersion},
@@ -61,9 +58,6 @@ func (s *NodeStrategy) DefaultPorts() []PortMapping {
 // InfoMessage returns the info message to display when starting Node container.
 func (s *NodeStrategy) InfoMessage(projectPath string) (string, error) {
 	nodeVersion := detectNodeVersion(projectPath)
-	if err != nil {
-		return "", FormatError("node", "detect node version", err)
-	}
 
 	return fmt.Sprintf("Node.js %s · npm", nodeVersion), nil
 }
@@ -97,12 +91,12 @@ func detectNodeVersion(projectPath string) string {
 			if strings.HasPrefix(line, "nodejs ") {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
-					return fields[1], nil
+					return fields[1]
 				}
 			}
 		}
 	}
 
 	// Default version
-	return "20", nil
+	return "20"
 }

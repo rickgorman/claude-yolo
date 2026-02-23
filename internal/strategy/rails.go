@@ -42,9 +42,6 @@ func (s *RailsStrategy) Volumes(hash string) []VolumeMount {
 // EnvVars returns the environment variables needed for Rails.
 func (s *RailsStrategy) EnvVars(projectPath string) ([]EnvVar, error) {
 	rubyVersion := detectRubyVersion(projectPath)
-	if err != nil {
-		return nil, FormatError("rails", "detect ruby version", err)
-	}
 
 	return []EnvVar{
 		{Key: "RUBY_VERSION", Value: rubyVersion},
@@ -65,9 +62,6 @@ func (s *RailsStrategy) DefaultPorts() []PortMapping {
 // InfoMessage returns the info message to display when starting Rails container.
 func (s *RailsStrategy) InfoMessage(projectPath string) (string, error) {
 	rubyVersion := detectRubyVersion(projectPath)
-	if err != nil {
-		return "", FormatError("rails", "detect ruby version", err)
-	}
 
 	return fmt.Sprintf("Ruby %s · Postgres", rubyVersion), nil
 }
@@ -92,7 +86,7 @@ func detectRubyVersion(projectPath string) string {
 			if strings.HasPrefix(line, "ruby ") || strings.HasPrefix(line, "local ruby ") {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
-					return fields[len(fields)-1], nil
+					return fields[len(fields)-1]
 				}
 			}
 		}
@@ -109,12 +103,12 @@ func detectRubyVersion(projectPath string) string {
 				line = strings.TrimPrefix(line, "ruby ")
 				line = strings.Trim(line, "\"'")
 				if line != "" {
-					return line, nil
+					return line
 				}
 			}
 		}
 	}
 
 	// Default version
-	return "4.0.1", nil
+	return "4.0.1"
 }

@@ -499,7 +499,7 @@ func buildPortMappings(strategy strategy.Strategy, pathHash string, yoloConfig *
 		mappings = []container.PortMapping{} // Clear strategy ports
 		for _, portStr := range yoloConfig.Ports {
 			var port int
-			_ = fmt.Sscanf(portStr, "%d", &port)
+			_, _ = fmt.Sscanf(portStr, "%d", &port)
 			if port > 0 {
 				mappings = append(mappings, container.PortMapping{
 					Host:      port,
@@ -568,7 +568,7 @@ func determineStrategy(args *cli.Args, yoloConfig *yoloconfig.Config, worktreePa
 
 func showStrategyMenu(results []strategy.DetectionResult, detector *strategy.Detector) string {
 	ui.BlankLine()
-	_ = fmt.Fprintln(ui.Out, "  Detected:")
+	_, _ = fmt.Fprintln(ui.Out, "  Detected:")
 
 	for i, result := range results {
 		glyph := "○"
@@ -590,7 +590,7 @@ func showStrategyMenu(results []strategy.DetectionResult, detector *strategy.Det
 	}
 
 	otherChoice := len(results) + 1
-	_ = fmt.Fprintf(ui.Out, "    %s  ○ %-10s        %s\n",
+	_, _ = fmt.Fprintf(ui.Out, "    %s  ○ %-10s        %s\n",
 		ui.Bold(fmt.Sprintf("%d", otherChoice)),
 		"other",
 		ui.Dim("see all supported / generate new"))
@@ -616,14 +616,14 @@ func chooseFromFullList(detector *strategy.Detector) string {
 	ui.BlankLine()
 	ui.Warn("No environment auto-detected")
 	ui.BlankLine()
-	_ = fmt.Fprintln(ui.Out, "  Select an environment:")
+	_, _ = fmt.Fprintln(ui.Out, "  Select an environment:")
 
 	for i, name := range strategies {
 		fmt.Fprintf(ui.Out, "    %s  %-12s\n", ui.Bold(fmt.Sprintf("%d", i+1)), name)
 	}
 
 	otherChoice := len(strategies) + 1
-	_ = fmt.Fprintf(ui.Out, "    %s  %-12s %s\n",
+	_, _ = fmt.Fprintf(ui.Out, "    %s  %-12s %s\n",
 		ui.Bold(fmt.Sprintf("%d", otherChoice)),
 		"other",
 		ui.Dim("generate prompt for new strategy"))

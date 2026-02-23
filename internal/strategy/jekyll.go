@@ -37,10 +37,7 @@ func (s *JekyllStrategy) Volumes(hash string) []VolumeMount {
 
 // EnvVars returns the environment variables needed for Jekyll.
 func (s *JekyllStrategy) EnvVars(projectPath string) ([]EnvVar, error) {
-	rubyVersion, err := detectRubyVersion(projectPath)
-	if err != nil {
-		return nil, FormatError("jekyll", "detect ruby version", err)
-	}
+	rubyVersion := detectRubyVersion(projectPath)
 
 	return []EnvVar{
 		{Key: "RUBY_VERSION", Value: rubyVersion},
@@ -55,10 +52,7 @@ func (s *JekyllStrategy) DefaultPorts() []PortMapping {
 
 // InfoMessage returns the info message to display when starting Jekyll container.
 func (s *JekyllStrategy) InfoMessage(projectPath string) (string, error) {
-	rubyVersion, err := detectRubyVersion(projectPath)
-	if err != nil {
-		return "", FormatError("jekyll", "detect ruby version", err)
-	}
+	rubyVersion := detectRubyVersion(projectPath)
 
 	return fmt.Sprintf("Jekyll · Ruby %s", rubyVersion), nil
 }
