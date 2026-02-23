@@ -1,6 +1,7 @@
 package container
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -21,30 +22,30 @@ func BenchmarkParsePortMapping(b *testing.B) {
 	}
 }
 
-func BenchmarkPortMapping_String(b *testing.B) {
+func BenchmarkPortMapping_Format(b *testing.B) {
 	pm := PortMapping{
-		HostIP:        "127.0.0.1",
-		HostPort:      8080,
-		ContainerPort: 80,
+		Host:      8080,
+		Container: 80,
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = pm.String()
+		// Format as string manually since there's no String() method
+		_ = fmt.Sprintf("%d:%d", pm.Host, pm.Container)
 	}
 }
 
-func BenchmarkFindConflicts(b *testing.B) {
+func BenchmarkDetectPortConflicts(b *testing.B) {
 	mappings := []PortMapping{
-		{HostPort: 3000, ContainerPort: 3000},
-		{HostPort: 5432, ContainerPort: 5432},
-		{HostPort: 6379, ContainerPort: 6379},
-		{HostPort: 9222, ContainerPort: 9222},
+		{Host: 3000, Container: 3000},
+		{Host: 5432, Container: 5432},
+		{Host: 6379, Container: 6379},
+		{Host: 9222, Container: 9222},
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = FindConflicts(mappings)
+		_ = DetectPortConflicts(mappings)
 	}
 }
 

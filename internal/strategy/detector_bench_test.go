@@ -34,7 +34,7 @@ func BenchmarkGetStrategy(b *testing.B) {
 	}
 }
 
-func BenchmarkRunDetectionQuick(b *testing.B) {
+func BenchmarkRunDetection(b *testing.B) {
 	tmpDir := b.TempDir()
 
 	// Create Rails markers
@@ -46,6 +46,6 @@ func BenchmarkRunDetectionQuick(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = detector.RunDetectionQuick(tmpDir)
+		_, _ = detector.RunDetection(tmpDir)
 	}
 }
