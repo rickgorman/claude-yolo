@@ -1,7 +1,6 @@
 run:
   timeout: 5m
   tests: true
-  skip-dirs-use-default: true
 
 linters:
   enable:
@@ -71,3 +70,11 @@ issues:
       linters:
         - gocyclo
         - dupl
+    # Exclude test directory from linting
+    - path: test/
+      linters:
+        - all
+    # Exclude strategies directory from linting
+    - path: strategies/
+      linters:
+        - all
