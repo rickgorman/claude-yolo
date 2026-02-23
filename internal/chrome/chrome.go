@@ -12,10 +12,10 @@ import (
 
 // Manager handles Chrome CDP lifecycle
 type Manager struct {
-	Port          int
-	UserDataDir   string
-	ChromeBinary  string
-	pidFile       string
+	Port         int
+	UserDataDir  string
+	ChromeBinary string
+	pidFile      string
 }
 
 // NewManager creates a Chrome manager for the specified CDP port
@@ -97,7 +97,7 @@ func (m *Manager) IsRunning() bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK
 }
