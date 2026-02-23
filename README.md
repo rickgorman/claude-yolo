@@ -76,6 +76,8 @@ claude-yolo --detect /path/to/project
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and changes
 - **[RELEASE.md](RELEASE.md)** - Release process for maintainers
 - **[SECURITY.md](SECURITY.md)** - Security audit and best practices
+- **[PERFORMANCE.md](PERFORMANCE.md)** - Benchmarks and performance analysis
+- **[PLATFORM.md](PLATFORM.md)** - Cross-platform compatibility guide
 - **Package Docs** - Run `go doc` on any package
 
 ## 🧪 Development
