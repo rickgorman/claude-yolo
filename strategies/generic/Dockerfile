@@ -6,8 +6,18 @@
 # need a specific language toolchain.
 #
 # Build:
-#   docker build -t claude-yolo-generic:latest -f strategies/generic/Dockerfile strategies/generic/
+#   docker build -t claude-yolo-generic:latest -f .Dockerfile strategies/generic/
 
+# Build entrypoint binary
+FROM golang:1.24-alpine AS entrypoint-builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/entrypoint ./cmd/entrypoint
+COPY internal/entrypoint ./internal/entrypoint
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /entrypoint ./cmd/entrypoint
+
+# Main image
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -59,8 +69,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /workspace
 
 # Entrypoint (runs as root to fix volume permissions, then drops to claude)
-COPY --chown=claude:claude entrypoint.sh /home/claude/entrypoint.sh
-RUN chmod +x /home/claude/entrypoint.sh
+COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
 
 USER root
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint", "generic"]
+CMD ["claude"]

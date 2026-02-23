@@ -6,7 +6,7 @@
 # versions via `go install golang.org/dl/goX.Y.Z@latest` if needed).
 #
 # Build:
-#   docker build -t claude-yolo-go:latest -f strategies/go/Dockerfile strategies/go/
+#   docker build -t claude-yolo-go:latest -f .Dockerfile strategies/go/
 
 FROM golang:1.23-bookworm
 
@@ -68,8 +68,9 @@ RUN go version
 WORKDIR /workspace
 
 # Entrypoint (runs as root to fix volume permissions, then drops to claude)
-COPY --chown=claude:claude entrypoint.sh /home/claude/entrypoint.sh
-RUN chmod +x /home/claude/entrypoint.sh
+COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
 
 USER root
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint", "go"]
+CMD ["claude"]
