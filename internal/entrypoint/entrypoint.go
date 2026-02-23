@@ -162,10 +162,14 @@ func setTerminalDimensions() {
 	}
 }
 
-// isTerminal checks if fd is a terminal
+// isTerminal checks if fd is a terminal (Unix-like systems only)
 func isTerminal(fd int) bool {
-	_, err := syscall.IoctlGetTermios(fd, syscall.TCGETS)
-	return err == nil
+	// Simple check: if stdin is a file, it's probably a terminal
+	fileInfo, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }
 
 // execCommand replaces current process with the given command

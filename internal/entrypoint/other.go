@@ -1,7 +1,6 @@
 package entrypoint
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 )
