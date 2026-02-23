@@ -4,8 +4,18 @@
 # Based on Debian with Ruby (via rbenv), Node.js, and PostgreSQL client.
 #
 # Build:
-#   docker build -t claude-yolo-rails:latest -f strategies/rails/Dockerfile strategies/rails/
+#   docker build -t claude-yolo-rails:latest -f strategies/rails/Dockerfile .
 
+# Build entrypoint binary
+FROM golang:1.24-alpine AS entrypoint-builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/entrypoint ./cmd/entrypoint
+COPY internal/entrypoint ./internal/entrypoint
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /entrypoint ./cmd/entrypoint
+
+# Main image
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -93,9 +103,12 @@ ENV BUNDLE_BIN="/home/claude/.gems/bin"
 
 WORKDIR /workspace
 
-# Entrypoint (runs as root to fix volume permissions, then drops to claude)
-COPY --chown=claude:claude entrypoint.sh /home/claude/entrypoint.sh
-RUN chmod +x /home/claude/entrypoint.sh
-
+# Switch to root for entrypoint setup
 USER root
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+
+# Entrypoint (runs as root to fix volume permissions, then drops to claude)
+COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
+
+ENTRYPOINT ["/usr/local/bin/entrypoint", "rails"]
+CMD ["claude"]

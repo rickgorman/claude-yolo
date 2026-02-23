@@ -71,7 +71,7 @@ output=$(cd "$RAILS_DIR" && \
   DOCKER_LOG="$DOCKER_LOG" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+  "$CLI" --yolo --strategy rails 2>&1 || true)
 
 docker_args=$(cat "$DOCKER_LOG" 2>/dev/null || echo "")
 
@@ -150,7 +150,7 @@ output=$(cd "$WORKTREE_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+  "$CLI" --yolo --strategy rails 2>&1 || true)
 
 worktree_docker_args=$(cat "$WORKTREE_DOCKER_LOG" 2>/dev/null || echo "")
 
@@ -178,7 +178,7 @@ output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+  "$CLI" --yolo --strategy rails 2>&1 || true)
 
 nonwt_docker_args=$(cat "$NONWT_DOCKER_LOG" 2>/dev/null || echo "")
 
@@ -216,7 +216,7 @@ cd "$CLAUDEJSON_DIR" && \
   HOME="$CLAUDEJSON_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic >/dev/null 2>&1 || true
+  "$CLI" --yolo --strategy generic >/dev/null 2>&1 || true
 
 claudejson_docker_args=$(cat "$CLAUDEJSON_DOCKER_LOG" 2>/dev/null || echo "")
 

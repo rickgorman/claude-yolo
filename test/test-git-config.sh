@@ -38,7 +38,7 @@ output=$(cd "$WORKTREE_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+  "$CLI" --yolo --strategy rails 2>&1 || true)
 
 worktree_docker_args=$(cat "$WORKTREE_DOCKER_LOG" 2>/dev/null || echo "")
 
@@ -77,7 +77,7 @@ output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails 2>&1 || true)
+  "$CLI" --yolo --strategy rails 2>&1 || true)
 
 nonwt_docker_args=$(cat "$NONWT_DOCKER_LOG" 2>/dev/null || echo "")
 

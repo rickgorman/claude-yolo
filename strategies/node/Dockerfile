@@ -5,8 +5,18 @@
 # Supports TypeScript, Next.js, Vite, and other Node.js frameworks.
 #
 # Build:
-#   docker build -t claude-yolo-node:latest -f strategies/node/Dockerfile strategies/node/
+#   docker build -t claude-yolo-node:latest -f strategies/node/Dockerfile .
 
+# Build entrypoint binary
+FROM golang:1.24-alpine AS entrypoint-builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/entrypoint ./cmd/entrypoint
+COPY internal/entrypoint ./internal/entrypoint
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /entrypoint ./cmd/entrypoint
+
+# Main image
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -74,8 +84,10 @@ RUN echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.bashrc \
 WORKDIR /workspace
 
 # Entrypoint (runs as root to fix volume permissions, then drops to claude)
-COPY --chown=claude:claude entrypoint.sh /home/claude/entrypoint.sh
-RUN chmod +x /home/claude/entrypoint.sh
-
 USER root
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+
+COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
+
+ENTRYPOINT ["/usr/local/bin/entrypoint", "node"]
+CMD ["claude"]

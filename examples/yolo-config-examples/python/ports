@@ -1,0 +1,5 @@
+# Flask/FastAPI default
+5000:5000
+
+# Jupyter notebook
+8888:8888

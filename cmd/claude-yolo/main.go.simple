@@ -1,0 +1,71 @@
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+const version = "2.0.0-dev"
+
+func main() {
+	// For now, just handle --help and --version
+	// Will expand this incrementally
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-h", "--help":
+			showHelp()
+			os.Exit(0)
+		case "--version":
+			fmt.Printf("claude-yolo %s (Go rewrite)\n", version)
+			os.Exit(0)
+		}
+	}
+
+	// Default: show usage
+	fmt.Fprintln(os.Stderr, "claude-yolo: Go rewrite in progress")
+	fmt.Fprintln(os.Stderr, "Use --help for usage information")
+	os.Exit(1)
+}
+
+func showHelp() {
+	help := `
+  claude·yolo — Run Claude Code in an isolated Docker container
+
+  Usage:
+    claude-yolo --yolo [options] [claude args...]
+    claude-yolo [claude args...]            (pass-through to native claude)
+
+  Container:
+    --yolo                   Run in a Docker container with --dangerously-skip-permissions
+    --strategy <name>        Skip auto-detection, use a specific strategy
+                             (rails, python, node, go, android, rust, generic)
+    --build                  Force rebuild the Docker image before running
+    --reset                  Remove existing container and recreate from image
+    --verbose                Show Docker build output instead of a spinner
+
+  Environment:
+    --env KEY=VALUE          Inject an env var into the container (repeatable)
+    --env-file <path>        Inject env vars from a dotenv-style file (repeatable)
+
+  Security:
+    --trust-github-token     Proceed even if the GitHub token has broad scopes
+                             (delete_repo, admin:org, etc.)
+    --trust-yolo             Skip .yolo/ directory trust prompt
+
+  Modes:
+    -p, --print              Headless mode — drop TTY, pass -p to Claude
+    --chrome                 Enable Chrome DevTools MCP server for browser control
+
+  Setup:
+    --setup-token            Run Claude OAuth setup and save credentials
+
+  Info:
+    -h, --help               Show this help and exit
+    --version                Show version and exit
+    CLAUDE_YOLO_NO_GITHUB=1  Skip GitHub token detection entirely
+
+  Without --yolo, all arguments are forwarded to the native claude command.
+`
+	fmt.Fprintln(os.Stderr, help)
+}

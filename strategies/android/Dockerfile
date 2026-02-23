@@ -7,7 +7,7 @@
 # Build:
 #   docker build --platform linux/amd64 \
 #       -t claude-yolo-android:latest \
-#       -f strategies/android/Dockerfile strategies/android/
+#       -f .Dockerfile strategies/android/
 
 FROM --platform=linux/amd64 ubuntu:24.04
 
@@ -81,7 +81,10 @@ RUN aapt2 version && adb version
 WORKDIR /workspace
 
 # Entrypoint
-COPY --chown=claude:claude entrypoint.sh /home/claude/entrypoint.sh
-RUN chmod +x /home/claude/entrypoint.sh
+USER root
 
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+COPY --from=entrypoint-builder /entrypoint /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
+
+ENTRYPOINT ["/usr/local/bin/entrypoint", "android"]
+CMD ["claude"]

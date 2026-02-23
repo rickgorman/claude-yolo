@@ -203,7 +203,7 @@ output=$(cd "$YOLO_ENV_DIR" && \
   HOME="$YOLO_ENV_TRUST_DIR" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic --trust-yolo 2>&1 || true)
+  "$CLI" --yolo --strategy generic --trust-yolo 2>&1 || true)
 
 yolo_env_docker_args=$(cat "$YOLO_ENV_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains ".yolo/env injects MY_YOLO_VAR" "$yolo_env_docker_args" "MY_YOLO_VAR=hello_yolo"
@@ -248,7 +248,7 @@ output=$(cd "$YOLO_UNTRUST_DIR" && \
   HOME="$YOLO_UNTRUST_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  echo "n" | bash "$CLI" --yolo --strategy generic 2>&1 || true)
+  echo "n" | "$CLI" --yolo --strategy generic 2>&1 || true)
 
 yolo_untrust_docker_args=$(cat "$YOLO_UNTRUST_DOCKER_LOG" 2>/dev/null || echo "")
 assert_not_contains ".yolo/env not loaded when declined" "$yolo_untrust_docker_args" "SHOULD_NOT_APPEAR"
@@ -356,7 +356,7 @@ output=$(cd "$YOLO_DOCKERFILE_DIR" && \
   HOME="$YOLO_DOCKERFILE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy generic --trust-yolo 2>&1 || true)
+  "$CLI" --yolo --strategy generic --trust-yolo 2>&1 || true)
 
 yolo_dockerfile_log=$(cat "$YOLO_DOCKERFILE_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains ".yolo/Dockerfile triggers project image build" "$output" "Building project image"

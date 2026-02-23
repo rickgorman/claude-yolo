@@ -6,7 +6,7 @@ source "$(dirname "$0")/lib/common.sh"
 
 section "Color suppression when piped"
 
-output=$(bash "$CLI" --yolo 2>&1 | cat || true)
+output=$("$CLI" --yolo 2>&1 | cat || true)
 if echo "$output" | grep -qP '\033\[' 2>/dev/null || echo "$output" | grep -q $'\033\[' 2>/dev/null; then
   fail "ANSI codes present when piped through cat"
 else
@@ -515,7 +515,7 @@ output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails --env MY_VAR=hello --env OTHER_VAR=world 2>&1 || true)
+  "$CLI" --yolo --strategy rails --env MY_VAR=hello --env OTHER_VAR=world 2>&1 || true)
 
 env_docker_args=$(cat "$ENV_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains "--env injects MY_VAR" "$env_docker_args" "MY_VAR=hello"
@@ -527,7 +527,7 @@ rm -f "$MOCK_BIN/uname" "$MOCK_BIN/tmux" "$MOCK_BIN/lsof" "$MOCK_BIN/curl"
 
 section "--env without value shows error"
 
-output=$(bash "$CLI" --yolo --env 2>&1 || true)
+output=$("$CLI" --yolo --env 2>&1 || true)
 assert_contains "--env without arg shows error" "$output" "--env requires a KEY=VALUE argument"
 
 ########################################
@@ -592,7 +592,7 @@ output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails --env-file "$ENV_FILE_TEST" 2>&1 || true)
+  "$CLI" --yolo --strategy rails --env-file "$ENV_FILE_TEST" 2>&1 || true)
 
 envfile_docker_args=$(cat "$ENV_FILE_DOCKER_LOG" 2>/dev/null || echo "")
 assert_contains "--env-file injects API_KEY" "$envfile_docker_args" "API_KEY=secret123"
@@ -608,13 +608,13 @@ rm -f "$MOCK_BIN/uname" "$MOCK_BIN/tmux" "$MOCK_BIN/lsof" "$MOCK_BIN/curl"
 
 section "--env-file with missing file shows error"
 
-output=$(bash "$CLI" --yolo --env-file /nonexistent/path 2>&1 || true)
+output=$("$CLI" --yolo --env-file /nonexistent/path 2>&1 || true)
 assert_contains "--env-file missing file shows error" "$output" "file not found"
 
 
 section "--env-file without path shows error"
 
-output=$(bash "$CLI" --yolo --env-file 2>&1 || true)
+output=$("$CLI" --yolo --env-file 2>&1 || true)
 assert_contains "--env-file without arg shows error" "$output" "--env-file requires a path argument"
 
 
@@ -664,7 +664,7 @@ output=$(cd "$RAILS_DIR" && \
   HOME="$FAKE_HOME" \
   GH_TOKEN="test_token_for_ci" \
   PATH="$MOCK_BIN:$PATH" \
-  bash "$CLI" --yolo --strategy rails --env INLINE_VAR=inline --env-file "$ENV_FILE_TEST" 2>&1 || true)
+  "$CLI" --yolo --strategy rails --env INLINE_VAR=inline --env-file "$ENV_FILE_TEST" 2>&1 || true)
 
 combined_docker_args=$(cat "$ENV_COMBINED_LOG" 2>/dev/null || echo "")
 assert_contains "Combined: --env var present" "$combined_docker_args" "INLINE_VAR=inline"
@@ -853,7 +853,7 @@ output_reset=$(bash -c '
   bash "'"$CLI"'" --yolo --strategy rails --reset 2>&1
 ' 2>&1 || true)
 
-assert_contains "--reset removes existing containers" "$output_reset" "Removed existing container"
+assert_contains "--reset removes existing containers" "$output_reset" "Removed existing container(s)"
 # TODO: Re-enable this assertion once we understand why "Building" message doesn't appear in CI
 # The test passes locally but fails in CI, likely due to output buffering/capture differences
 # if echo "$output_reset" | grep -qE "(Building|Image ready)"; then
@@ -869,7 +869,7 @@ assert_contains "--reset removes existing containers" "$output_reset" "Removed e
 
 section "--reset arg parsing"
 
-output_reset_parse=$(bash "$CLI" --yolo --reset --strategy 2>&1 || true)
+output_reset_parse=$("$CLI" --yolo --reset --strategy 2>&1 || true)
 assert_contains "--reset is parsed before --strategy error" "$output_reset_parse" "--strategy requires an argument"
 
 ########################################
@@ -1032,7 +1032,7 @@ output_setup_token=$(cd "$SETUP_TOKEN_DIR" && \
   HOME="$SETUP_TOKEN_HOME" \
   PATH="$MOCK_BIN:$PATH" \
   CLAUDE_YOLO_NO_GITHUB=1 \
-  bash "$CLI" --yolo --strategy generic --setup-token 2>&1 || true)
+  "$CLI" --yolo --strategy generic --setup-token 2>&1 || true)
 
 assert_contains "--setup-token runs on host" "$output_setup_token" "claude setup-token"
 
