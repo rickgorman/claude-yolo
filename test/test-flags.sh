@@ -853,7 +853,7 @@ output_reset=$(bash -c '
   bash "'"$CLI"'" --yolo --strategy rails --reset 2>&1
 ' 2>&1 || true)
 
-assert_contains "--reset removes existing containers" "$output_reset" "Removed existing container"
+assert_contains "--reset removes existing containers" "$output_reset" "Removed existing container(s)"
 # TODO: Re-enable this assertion once we understand why "Building" message doesn't appear in CI
 # The test passes locally but fails in CI, likely due to output buffering/capture differences
 # if echo "$output_reset" | grep -qE "(Building|Image ready)"; then

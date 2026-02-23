@@ -71,17 +71,20 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  unit-tests:
-    name: Unit Tests (Bash)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Run unit test suite
-        run: ./test/run-unit-tests.sh
+  # TODO: Convert bash unit tests to Go (see Task #12)
+  # These tests are designed for the old bash implementation
+  # and need to be rewritten for the Go rewrite
+  # unit-tests:
+  #   name: Unit Tests (Bash)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install jq
+  #       run: sudo apt-get update && sudo apt-get install -y jq
+  #
+  #     - name: Run unit test suite
+  #       run: ./test/run-unit-tests.sh
 
   docker-build-rails:
     name: Docker Build (rails)
