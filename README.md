@@ -19,15 +19,84 @@ Run Claude Code in isolated, project-specific Docker containers with automatic e
 - **Session Persistence** - Reconnect to existing containers seamlessly
 - **Project Configuration** - `.yolo/` directory for custom settings
 
+## 📦 Installation
+
+### Quick Install (Recommended)
+
+**Prerequisites**: Go 1.24+ and Docker
+
+```bash
+# Clone the repository
+git clone https://github.com/rickgorman/claude-yolo.git
+cd claude-yolo
+
+# Run the install script (interactive)
+./scripts/install.sh
+```
+
+The install script will:
+1. ✅ Build the binary for your platform
+2. ✅ Check prerequisites (Go, Docker)
+3. ✅ Offer installation options (symlink or PATH)
+
+### Manual Installation
+
+```bash
+# Clone and build
+git clone https://github.com/rickgorman/claude-yolo.git
+cd claude-yolo
+make build
+
+# Add to PATH (choose one):
+
+# Option 1: Symlink to /usr/local/bin
+sudo ln -sf "$(pwd)/bin/claude-yolo" /usr/local/bin/claude-yolo
+
+# Option 2: Add to PATH in your shell config (~/.zshrc, ~/.bashrc)
+export PATH="$HOME/work/claude-yolo/bin:$PATH"
+```
+
+**Verify installation:**
+```bash
+claude-yolo --version
+```
+
+### Rebuilding After Updates
+
+```bash
+cd ~/work/claude-yolo
+git pull
+make build
+```
+
+**Important**: After pulling updates or switching branches, always run `make build` to recompile the binary for your platform.
+
+### Cross-Platform Builds
+
+```bash
+# Build for macOS (Intel)
+make build-darwin-amd64
+
+# Build for macOS (Apple Silicon)
+make build-darwin-arm64
+
+# Build for Linux
+make build-linux-amd64
+
+# Build all platforms
+make build-all
+```
+
+Binaries will be in `bin/` directory with platform-specific names.
+
 ## 🚀 Quick Start
 
 ```bash
-# Build
-make build
+# Start containerized session in any project
+cd ~/my-rails-app
+claude-yolo --yolo
 
-# Run in any project
-cd ~/my-project
-./bin/claude-yolo --yolo
+# Claude will automatically detect your environment and start!
 ```
 
 ## 📖 Usage

@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean test-unit test-integration test-all install-hooks bench bench-all
+.PHONY: build test lint install clean test-unit test-integration test-all install-hooks bench bench-all build-all build-darwin-amd64 build-darwin-arm64 build-linux-amd64 build-linux-arm64
 
 # Go binary name
 BINARY=claude-yolo
@@ -7,15 +7,49 @@ BUILD_DIR=bin
 # Go build flags
 GO_BUILD_FLAGS=-ldflags="-s -w"
 
+# Detect current platform
+GOOS=$(shell go env GOOS)
+GOARCH=$(shell go env GOARCH)
+
 build:
-	@echo "Building $(BINARY)..."
+	@echo "Building $(BINARY) for $(GOOS)/$(GOARCH)..."
 	@mkdir -p $(BUILD_DIR)
 	@go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/claude-yolo
+	@echo "✓ Built: $(BUILD_DIR)/$(BINARY)"
 
 build-dev:
 	@echo "Building $(BINARY) (dev mode)..."
 	@mkdir -p $(BUILD_DIR)
 	@go build -o $(BUILD_DIR)/$(BINARY) ./cmd/claude-yolo
+
+# Cross-platform builds
+build-darwin-amd64:
+	@echo "Building $(BINARY) for macOS (Intel)..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=darwin GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 ./cmd/claude-yolo
+	@echo "✓ Built: $(BUILD_DIR)/$(BINARY)-darwin-amd64"
+
+build-darwin-arm64:
+	@echo "Building $(BINARY) for macOS (Apple Silicon)..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=darwin GOARCH=arm64 go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 ./cmd/claude-yolo
+	@echo "✓ Built: $(BUILD_DIR)/$(BINARY)-darwin-arm64"
+
+build-linux-amd64:
+	@echo "Building $(BINARY) for Linux (amd64)..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/claude-yolo
+	@echo "✓ Built: $(BUILD_DIR)/$(BINARY)-linux-amd64"
+
+build-linux-arm64:
+	@echo "Building $(BINARY) for Linux (ARM64)..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=linux GOARCH=arm64 go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-arm64 ./cmd/claude-yolo
+	@echo "✓ Built: $(BUILD_DIR)/$(BINARY)-linux-arm64"
+
+build-all: build-darwin-amd64 build-darwin-arm64 build-linux-amd64 build-linux-arm64
+	@echo "✓ All platform builds complete!"
+	@ls -lh $(BUILD_DIR)/$(BINARY)-*
 
 test:
 	@echo "Running Go unit tests..."
