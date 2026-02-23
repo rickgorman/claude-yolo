@@ -3,6 +3,8 @@ package strategy
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // AndroidStrategy implements the Strategy interface for Android projects.
@@ -19,13 +21,104 @@ func NewAndroidStrategy() *AndroidStrategy {
 	}
 }
 
-// Detect runs the Android detection script.
+// Detect checks for Android project indicators using pure Go.
 func (s *AndroidStrategy) Detect(projectPath string) (confidence int, message string, err error) {
-	confidence, evidence, err := runDetectScript(s.strategiesDir, "android", projectPath)
-	if err != nil {
-		return 0, "", FormatError("android", "detect", err)
+	evidence := []string{}
+
+	// Check both the root and an android/ subdirectory
+	androidDir := ""
+	if fileExists(filepath.Join(projectPath, "build.gradle")) ||
+		fileExists(filepath.Join(projectPath, "build.gradle.kts")) {
+		androidDir = projectPath
+	} else if fileExists(filepath.Join(projectPath, "android", "build.gradle")) ||
+		fileExists(filepath.Join(projectPath, "android", "build.gradle.kts")) {
+		androidDir = filepath.Join(projectPath, "android")
+		evidence = append(evidence, "android/ subdir")
 	}
-	return confidence, evidence, nil
+
+	// Root build.gradle(.kts)
+	if androidDir != "" {
+		confidence += 15
+		evidence = append(evidence, "build.gradle")
+	}
+
+	// settings.gradle(.kts)
+	if androidDir != "" && (fileExists(filepath.Join(androidDir, "settings.gradle")) ||
+		fileExists(filepath.Join(androidDir, "settings.gradle.kts"))) {
+		confidence += 10
+		evidence = append(evidence, "settings.gradle")
+	}
+
+	// app/build.gradle(.kts) - strong Android signal
+	if androidDir != "" && (fileExists(filepath.Join(androidDir, "app", "build.gradle")) ||
+		fileExists(filepath.Join(androidDir, "app", "build.gradle.kts"))) {
+		confidence += 20
+		evidence = append(evidence, "app/build.gradle")
+	}
+
+	// AndroidManifest.xml anywhere in the tree (up to 5 levels deep)
+	manifestFound := false
+	_ = filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || manifestFound {
+			return filepath.SkipDir
+		}
+		// Check depth
+		rel, _ := filepath.Rel(projectPath, path)
+		depth := strings.Count(rel, string(filepath.Separator))
+		if depth > 5 {
+			return filepath.SkipDir
+		}
+		if !info.IsDir() && info.Name() == "AndroidManifest.xml" {
+			manifestFound = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if manifestFound {
+		confidence += 25
+		evidence = append(evidence, "AndroidManifest.xml")
+	}
+
+	// gradlew (in root or android/)
+	if fileExists(filepath.Join(projectPath, "gradlew")) ||
+		(androidDir != "" && fileExists(filepath.Join(androidDir, "gradlew"))) {
+		confidence += 10
+		evidence = append(evidence, "gradlew")
+	}
+
+	// Android plugin in build files
+	if androidDir != "" {
+		buildFiles := []string{
+			filepath.Join(androidDir, "build.gradle"),
+			filepath.Join(androidDir, "build.gradle.kts"),
+			filepath.Join(androidDir, "app", "build.gradle"),
+			filepath.Join(androidDir, "app", "build.gradle.kts"),
+		}
+		for _, buildFile := range buildFiles {
+			if data, err := os.ReadFile(buildFile); err == nil {
+				if strings.Contains(string(data), "com.android") {
+					confidence += 20
+					evidence = append(evidence, "com.android plugin")
+					break
+				}
+			}
+		}
+	}
+
+	// Cap at 100
+	if confidence > 100 {
+		confidence = 100
+	}
+
+	return confidence, strings.Join(evidence, ", "), nil
+}
+
+// fileExists checks if a file exists
+func fileExists(path string) bool {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return true
+	}
+	return false
 }
 
 // Volumes returns the Docker volumes needed for Android.

@@ -2,6 +2,10 @@ package strategy
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // JekyllStrategy implements the Strategy interface for Jekyll projects.
@@ -18,13 +22,106 @@ func NewJekyllStrategy() *JekyllStrategy {
 	}
 }
 
-// Detect runs the Jekyll detection script.
+// Detect checks for Jekyll project indicators using pure Go.
 func (s *JekyllStrategy) Detect(projectPath string) (confidence int, message string, err error) {
-	confidence, evidence, err := runDetectScript(s.strategiesDir, "jekyll", projectPath)
-	if err != nil {
-		return 0, "", FormatError("jekyll", "detect", err)
+	evidence := []string{}
+
+	// Check for _config.yml (strong Jekyll signal)
+	configPath := filepath.Join(projectPath, "_config.yml")
+	if data, err := os.ReadFile(configPath); err == nil {
+		confidence += 35
+		evidence = append(evidence, "_config.yml")
+
+		// Check for Jekyll-specific keys in _config.yml
+		content := string(data)
+		re := regexp.MustCompile(`^(remote_theme|theme|jekyll|plugins):`)
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			if re.MatchString(line) {
+				confidence += 15
+				evidence = append(evidence, "Jekyll config keys")
+				break
+			}
+		}
 	}
-	return confidence, evidence, nil
+
+	// Check for Gemfile with jekyll gem
+	gemfilePath := filepath.Join(projectPath, "Gemfile")
+	if data, err := os.ReadFile(gemfilePath); err == nil {
+		content := string(data)
+		if strings.Contains(content, "'jekyll'") ||
+			strings.Contains(content, `"jekyll"`) ||
+			strings.Contains(content, "github-pages") {
+			confidence += 30
+			evidence = append(evidence, "Gemfile with jekyll")
+		}
+	}
+
+	// Check for _layouts/ directory
+	if info, err := os.Stat(filepath.Join(projectPath, "_layouts")); err == nil && info.IsDir() {
+		confidence += 10
+		evidence = append(evidence, "_layouts/")
+	}
+
+	// Check for _posts/ directory
+	if info, err := os.Stat(filepath.Join(projectPath, "_posts")); err == nil && info.IsDir() {
+		confidence += 5
+		evidence = append(evidence, "_posts/")
+	}
+
+	// Check for _data/ directory
+	if info, err := os.Stat(filepath.Join(projectPath, "_data")); err == nil && info.IsDir() {
+		confidence += 5
+		evidence = append(evidence, "_data/")
+	}
+
+	// Check for _includes/ directory
+	if info, err := os.Stat(filepath.Join(projectPath, "_includes")); err == nil && info.IsDir() {
+		confidence += 5
+		evidence = append(evidence, "_includes/")
+	}
+
+	// Check for .ruby-version or .tool-versions (evidence only, no confidence)
+	rubyVersionPath := filepath.Join(projectPath, ".ruby-version")
+	if data, err := os.ReadFile(rubyVersionPath); err == nil {
+		rubyVer := strings.TrimSpace(string(data))
+		evidence = append(evidence, fmt.Sprintf(".ruby-version (%s)", rubyVer))
+	} else {
+		toolVersionsFile := filepath.Join(projectPath, ".tool-versions")
+		if data, err := os.ReadFile(toolVersionsFile); err == nil {
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "ruby ") {
+					evidence = append(evidence, ".tool-versions (ruby)")
+					break
+				}
+			}
+		}
+	}
+
+	// Negative signal: if this looks like a Rails project
+	gemfilePath = filepath.Join(projectPath, "Gemfile")
+	if data, err := os.ReadFile(gemfilePath); err == nil {
+		if strings.Contains(string(data), "'rails'") {
+			confidence -= 50
+		}
+	}
+	if _, err := os.Stat(filepath.Join(projectPath, "config", "application.rb")); err == nil {
+		confidence -= 50
+	}
+
+	// Floor at 0
+	if confidence < 0 {
+		confidence = 0
+	}
+
+	// Cap at 100
+	if confidence > 100 {
+		confidence = 100
+	}
+
+	return confidence, strings.Join(evidence, ", "), nil
 }
 
 // Volumes returns the Docker volumes needed for Jekyll.

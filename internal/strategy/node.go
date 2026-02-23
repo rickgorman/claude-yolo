@@ -21,13 +21,120 @@ func NewNodeStrategy() *NodeStrategy {
 	}
 }
 
-// Detect runs the Node detection script.
+// Detect checks for Node.js/TypeScript project indicators using pure Go.
 func (s *NodeStrategy) Detect(projectPath string) (confidence int, message string, err error) {
-	confidence, evidence, err := runDetectScript(s.strategiesDir, "node", projectPath)
-	if err != nil {
-		return 0, "", FormatError("node", "detect", err)
+	evidence := []string{}
+
+	// Check for package.json (strong signal)
+	if _, err := os.Stat(filepath.Join(projectPath, "package.json")); err == nil {
+		confidence += 40
+		evidence = append(evidence, "package.json")
 	}
-	return confidence, evidence, nil
+
+	// Check for lock files
+	if _, err := os.Stat(filepath.Join(projectPath, "package-lock.json")); err == nil {
+		confidence += 15
+		evidence = append(evidence, "package-lock.json")
+	} else if _, err := os.Stat(filepath.Join(projectPath, "yarn.lock")); err == nil {
+		confidence += 15
+		evidence = append(evidence, "yarn.lock")
+	} else if _, err := os.Stat(filepath.Join(projectPath, "pnpm-lock.yaml")); err == nil {
+		confidence += 15
+		evidence = append(evidence, "pnpm-lock.yaml")
+	} else if _, err := os.Stat(filepath.Join(projectPath, "bun.lockb")); err == nil {
+		confidence += 15
+		evidence = append(evidence, "bun.lock")
+	} else if _, err := os.Stat(filepath.Join(projectPath, "bun.lock")); err == nil {
+		confidence += 15
+		evidence = append(evidence, "bun.lock")
+	}
+
+	// Check for tsconfig.json
+	if _, err := os.Stat(filepath.Join(projectPath, "tsconfig.json")); err == nil {
+		confidence += 15
+		evidence = append(evidence, "tsconfig.json")
+	}
+
+	// Check for .nvmrc
+	nvmrcPath := filepath.Join(projectPath, ".nvmrc")
+	if data, err := os.ReadFile(nvmrcPath); err == nil {
+		nodeVer := strings.TrimSpace(string(data))
+		confidence += 10
+		evidence = append(evidence, fmt.Sprintf(".nvmrc (%s)", nodeVer))
+	} else {
+		// Check for .node-version
+		nodeVersionPath := filepath.Join(projectPath, ".node-version")
+		if data, err := os.ReadFile(nodeVersionPath); err == nil {
+			nodeVer := strings.TrimSpace(string(data))
+			confidence += 10
+			evidence = append(evidence, fmt.Sprintf(".node-version (%s)", nodeVer))
+		}
+	}
+
+	// Check for .tool-versions with nodejs entry
+	toolVersionsFile := filepath.Join(projectPath, ".tool-versions")
+	if data, err := os.ReadFile(toolVersionsFile); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "nodejs ") {
+				confidence += 10
+				evidence = append(evidence, ".tool-versions (nodejs)")
+				break
+			}
+		}
+	}
+
+	// Check for framework configs
+	nextConfigs := []string{"next.config.js", "next.config.ts", "next.config.mjs"}
+	for _, cfg := range nextConfigs {
+		if _, err := os.Stat(filepath.Join(projectPath, cfg)); err == nil {
+			confidence += 10
+			evidence = append(evidence, "next.config")
+			break
+		}
+	}
+	viteConfigs := []string{"vite.config.ts", "vite.config.js"}
+	hasVite := false
+	for _, cfg := range viteConfigs {
+		if _, err := os.Stat(filepath.Join(projectPath, cfg)); err == nil {
+			confidence += 10
+			evidence = append(evidence, "vite.config")
+			hasVite = true
+			break
+		}
+	}
+	if !hasVite {
+		webpackConfigs := []string{"webpack.config.js", "webpack.config.ts"}
+		for _, cfg := range webpackConfigs {
+			if _, err := os.Stat(filepath.Join(projectPath, cfg)); err == nil {
+				confidence += 10
+				evidence = append(evidence, "webpack.config")
+				break
+			}
+		}
+	}
+
+	// Negative signal: if this looks like a Rails project
+	gemfilePath := filepath.Join(projectPath, "Gemfile")
+	if data, err := os.ReadFile(gemfilePath); err == nil {
+		content := string(data)
+		if strings.Contains(content, "'rails'") {
+			confidence -= 30
+		}
+	}
+
+	// Floor at 0
+	if confidence < 0 {
+		confidence = 0
+	}
+
+	// Cap at 100
+	if confidence > 100 {
+		confidence = 100
+	}
+
+	return confidence, strings.Join(evidence, ", "), nil
 }
 
 // Volumes returns the Docker volumes needed for Node.

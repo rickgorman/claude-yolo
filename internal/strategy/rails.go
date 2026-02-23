@@ -21,13 +21,49 @@ func NewRailsStrategy() *RailsStrategy {
 	}
 }
 
-// Detect runs the Rails detection script.
+// Detect checks for Rails project indicators using pure Go.
 func (s *RailsStrategy) Detect(projectPath string) (confidence int, message string, err error) {
-	confidence, evidence, err := runDetectScript(s.strategiesDir, "rails", projectPath)
-	if err != nil {
-		return 0, "", FormatError("rails", "detect", err)
+	evidence := []string{}
+
+	// Check for Gemfile with rails gem
+	gemfilePath := filepath.Join(projectPath, "Gemfile")
+	if data, err := os.ReadFile(gemfilePath); err == nil {
+		confidence += 20
+		content := string(data)
+		if strings.Contains(content, "'rails'") || strings.Contains(content, `"rails"`) {
+			confidence += 40
+			evidence = append(evidence, "Gemfile with rails")
+		} else {
+			evidence = append(evidence, "Gemfile (no rails gem)")
+		}
 	}
-	return confidence, evidence, nil
+
+	// Check for config/application.rb
+	if _, err := os.Stat(filepath.Join(projectPath, "config", "application.rb")); err == nil {
+		confidence += 20
+		evidence = append(evidence, "config/application.rb")
+	}
+
+	// Check for .ruby-version
+	rubyVersionPath := filepath.Join(projectPath, ".ruby-version")
+	if data, err := os.ReadFile(rubyVersionPath); err == nil {
+		rubyVer := strings.TrimSpace(string(data))
+		confidence += 10
+		evidence = append(evidence, fmt.Sprintf(".ruby-version (%s)", rubyVer))
+	}
+
+	// Check for bin/rails
+	if _, err := os.Stat(filepath.Join(projectPath, "bin", "rails")); err == nil {
+		confidence += 10
+		evidence = append(evidence, "bin/rails")
+	}
+
+	// Cap at 100
+	if confidence > 100 {
+		confidence = 100
+	}
+
+	return confidence, strings.Join(evidence, ", "), nil
 }
 
 // Volumes returns the Docker volumes needed for Rails.

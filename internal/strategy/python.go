@@ -22,13 +22,72 @@ func NewPythonStrategy() *PythonStrategy {
 	}
 }
 
-// Detect runs the Python detection script.
+// Detect checks for Python project indicators using pure Go.
 func (s *PythonStrategy) Detect(projectPath string) (confidence int, message string, err error) {
-	confidence, evidence, err := runDetectScript(s.strategiesDir, "python", projectPath)
-	if err != nil {
-		return 0, "", FormatError("python", "detect", err)
+	evidence := []string{}
+
+	// Check for pyproject.toml (strong signal — modern Python)
+	if _, err := os.Stat(filepath.Join(projectPath, "pyproject.toml")); err == nil {
+		confidence += 35
+		evidence = append(evidence, "pyproject.toml")
 	}
-	return confidence, evidence, nil
+
+	// Check for requirements.txt
+	if _, err := os.Stat(filepath.Join(projectPath, "requirements.txt")); err == nil {
+		confidence += 30
+		evidence = append(evidence, "requirements.txt")
+	}
+
+	// Check for setup.py (legacy but common)
+	if _, err := os.Stat(filepath.Join(projectPath, "setup.py")); err == nil {
+		confidence += 20
+		evidence = append(evidence, "setup.py")
+	}
+
+	// Check for setup.cfg
+	if _, err := os.Stat(filepath.Join(projectPath, "setup.cfg")); err == nil {
+		confidence += 10
+		evidence = append(evidence, "setup.cfg")
+	}
+
+	// Check for .python-version (pyenv)
+	pythonVersionPath := filepath.Join(projectPath, ".python-version")
+	if data, err := os.ReadFile(pythonVersionPath); err == nil {
+		pythonVer := strings.TrimSpace(string(data))
+		confidence += 15
+		evidence = append(evidence, fmt.Sprintf(".python-version (%s)", pythonVer))
+	}
+
+	// Check for Pipfile (pipenv)
+	if _, err := os.Stat(filepath.Join(projectPath, "Pipfile")); err == nil {
+		confidence += 20
+		evidence = append(evidence, "Pipfile")
+	}
+
+	// Check for poetry.lock
+	if _, err := os.Stat(filepath.Join(projectPath, "poetry.lock")); err == nil {
+		confidence += 10
+		evidence = append(evidence, "poetry.lock")
+	}
+
+	// Check for uv.lock (uv package manager)
+	if _, err := os.Stat(filepath.Join(projectPath, "uv.lock")); err == nil {
+		confidence += 10
+		evidence = append(evidence, "uv.lock")
+	}
+
+	// Check for tox.ini
+	if _, err := os.Stat(filepath.Join(projectPath, "tox.ini")); err == nil {
+		confidence += 5
+		evidence = append(evidence, "tox.ini")
+	}
+
+	// Cap at 100
+	if confidence > 100 {
+		confidence = 100
+	}
+
+	return confidence, strings.Join(evidence, ", "), nil
 }
 
 // Volumes returns the Docker volumes needed for Python.

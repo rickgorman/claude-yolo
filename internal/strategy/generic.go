@@ -15,13 +15,9 @@ func NewGenericStrategy() *GenericStrategy {
 	}
 }
 
-// Detect runs the Generic detection script (always returns 0).
+// Detect always returns 0 confidence for Generic (manual selection only).
 func (s *GenericStrategy) Detect(projectPath string) (confidence int, message string, err error) {
-	confidence, evidence, err := runDetectScript(s.strategiesDir, "generic", projectPath)
-	if err != nil {
-		return 0, "", FormatError("generic", "detect", err)
-	}
-	return confidence, evidence, nil
+	return 0, "manual selection only", nil
 }
 
 // Volumes returns the Docker volumes needed for Generic (none).

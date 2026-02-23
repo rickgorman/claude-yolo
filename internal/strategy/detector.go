@@ -1,13 +1,10 @@
 package strategy
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -155,35 +152,4 @@ func (d *Detector) DetectBestStrategy(projectPath string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no strategy detected (available: rails, node, python, go, rust, android, jekyll, generic)\n\nManually specify one with: claude-yolo --yolo --strategy <name>")
-}
-
-// runDetectScript executes a strategy's detect.sh script and parses the output.
-func runDetectScript(strategiesDir, strategyName, projectPath string) (confidence int, evidence string, err error) {
-	scriptPath := filepath.Join(strategiesDir, strategyName, "detect.sh")
-
-	// Check if detect.sh exists
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		return 0, "", fmt.Errorf("detect.sh not found for strategy %s", strategyName)
-	}
-
-	cmd := exec.Command(scriptPath, projectPath)
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, "", err
-	}
-
-	// Parse output
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "CONFIDENCE:") {
-			confStr := strings.TrimPrefix(line, "CONFIDENCE:")
-			confidence, _ = strconv.Atoi(strings.TrimSpace(confStr))
-		} else if strings.HasPrefix(line, "EVIDENCE:") {
-			evidence = strings.TrimPrefix(line, "EVIDENCE:")
-			evidence = strings.TrimSpace(evidence)
-		}
-	}
-
-	return confidence, evidence, nil
 }
