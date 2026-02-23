@@ -19,7 +19,7 @@ func NewGoStrategy() *GoStrategy {
 }
 
 // Detect runs the Go detection script.
-func (s *GoStrategy) Detect(projectPath string) (int, string, error) {
+func (s *GoStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "go", projectPath)
 	if err != nil {
 		return 0, "", FormatError("go", "detect", err)

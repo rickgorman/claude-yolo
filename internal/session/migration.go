@@ -53,7 +53,7 @@ func migrateSessionsInDir(baseDir string) error {
 		// Check if container is still running
 		cmd := exec.Command("docker", "ps", "--filter", "name=claude-yolo-"+hash, "--format", "{{.Names}}")
 		output, err := cmd.Output()
-		if err == nil && len(strings.TrimSpace(string(output))) > 0 {
+		if err == nil && strings.TrimSpace(string(output)) != "" {
 			// Container still running, skip migration
 			continue
 		}

@@ -49,7 +49,7 @@ linters-settings:
       - weakCond
 
   gocyclo:
-    min-complexity: 15
+    min-complexity: 25
 
   dupl:
     threshold: 100

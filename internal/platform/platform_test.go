@@ -102,7 +102,7 @@ func TestEnvironmentVariables(t *testing.T) {
 	if err := os.Setenv(testKey, testValue); err != nil {
 		t.Fatalf("Failed to set environment variable: %v", err)
 	}
-	defer os.Unsetenv(testKey)
+	defer func() { _ = os.Unsetenv(testKey) }()
 
 	// Get env var
 	got := os.Getenv(testKey)

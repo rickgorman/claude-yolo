@@ -80,7 +80,7 @@ func (c *Client) FindRunningContainer(ctx context.Context, namePrefix string) (s
 	for _, ctr := range containers {
 		for _, name := range ctr.Names {
 			// Docker container names start with "/"
-			if len(name) > 0 && name[0] == '/' {
+			if name != "" && name[0] == '/' {
 				name = name[1:]
 			}
 			if matchesPrefix(name, namePrefix) {
@@ -107,7 +107,7 @@ func (c *Client) FindStoppedContainer(ctx context.Context, namePrefix string) (s
 	for _, ctr := range containers {
 		for _, name := range ctr.Names {
 			// Docker container names start with "/"
-			if len(name) > 0 && name[0] == '/' {
+			if name != "" && name[0] == '/' {
 				name = name[1:]
 			}
 			if matchesPrefix(name, namePrefix) {

@@ -19,7 +19,7 @@ func NewJekyllStrategy() *JekyllStrategy {
 }
 
 // Detect runs the Jekyll detection script.
-func (s *JekyllStrategy) Detect(projectPath string) (int, string, error) {
+func (s *JekyllStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "jekyll", projectPath)
 	if err != nil {
 		return 0, "", FormatError("jekyll", "detect", err)

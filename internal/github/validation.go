@@ -108,7 +108,7 @@ func findBroadScopes(scopesHeader string) []string {
 	for _, scope := range BroadScopes {
 		// Try multiple matching patterns to catch different formats
 		patterns := []string{
-			"," + scope + ",",                 // exact match with commas
+			"," + scope + ",",                    // exact match with commas
 			"," + strings.TrimSpace(scope) + ",", // with trimmed whitespace
 		}
 

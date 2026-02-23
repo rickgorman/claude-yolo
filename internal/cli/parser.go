@@ -16,14 +16,14 @@ type Args struct {
 	DetectOnlyPath string
 
 	// Container flags
-	Strategy       string
-	ForceBuild     bool
-	Verbose        bool
-	ResetMode      bool
+	Strategy   string
+	ForceBuild bool
+	Verbose    bool
+	ResetMode  bool
 
 	// Environment flags
-	ExtraEnv  []string
-	EnvFiles  []string
+	ExtraEnv []string
+	EnvFiles []string
 
 	// Feature flags
 	ChromeMode bool

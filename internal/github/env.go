@@ -13,6 +13,7 @@ import (
 //   - GITHUB_TOKEN=value
 //   - export GH_TOKEN=value
 //   - export GITHUB_TOKEN=value
+//
 // Values can be quoted with single or double quotes.
 func parseEnvFile(filePath string) (string, error) {
 	file, err := os.Open(filePath)

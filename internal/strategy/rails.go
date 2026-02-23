@@ -22,7 +22,7 @@ func NewRailsStrategy() *RailsStrategy {
 }
 
 // Detect runs the Rails detection script.
-func (s *RailsStrategy) Detect(projectPath string) (int, string, error) {
+func (s *RailsStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "rails", projectPath)
 	if err != nil {
 		return 0, "", FormatError("rails", "detect", err)
@@ -41,7 +41,7 @@ func (s *RailsStrategy) Volumes(hash string) []VolumeMount {
 
 // EnvVars returns the environment variables needed for Rails.
 func (s *RailsStrategy) EnvVars(projectPath string) ([]EnvVar, error) {
-	rubyVersion, err := detectRubyVersion(projectPath)
+	rubyVersion := detectRubyVersion(projectPath)
 	if err != nil {
 		return nil, FormatError("rails", "detect ruby version", err)
 	}
@@ -64,7 +64,7 @@ func (s *RailsStrategy) DefaultPorts() []PortMapping {
 
 // InfoMessage returns the info message to display when starting Rails container.
 func (s *RailsStrategy) InfoMessage(projectPath string) (string, error) {
-	rubyVersion, err := detectRubyVersion(projectPath)
+	rubyVersion := detectRubyVersion(projectPath)
 	if err != nil {
 		return "", FormatError("rails", "detect ruby version", err)
 	}
@@ -73,13 +73,13 @@ func (s *RailsStrategy) InfoMessage(projectPath string) (string, error) {
 }
 
 // detectRubyVersion detects the Ruby version from project files.
-func detectRubyVersion(projectPath string) (string, error) {
+func detectRubyVersion(projectPath string) string {
 	// Check .ruby-version
 	rubyVersionFile := filepath.Join(projectPath, ".ruby-version")
 	if data, err := os.ReadFile(rubyVersionFile); err == nil {
 		version := strings.TrimSpace(string(data))
 		if version != "" {
-			return version, nil
+			return version
 		}
 	}
 

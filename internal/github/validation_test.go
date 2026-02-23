@@ -17,7 +17,7 @@ func TestValidateToken(t *testing.T) {
 				t.Errorf("Expected Authorization header with token, got %s", r.Header.Get("Authorization"))
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"login":"testuser"}`))
+			_ = w.Write([]byte(`{"login":"testuser"}`))
 		}))
 		defer server.Close()
 
@@ -107,7 +107,7 @@ func TestCheckScopes(t *testing.T) {
 				}
 				w.WriteHeader(tt.statusCode)
 				if tt.statusCode == 200 {
-					w.Write([]byte(`{"login":"testuser"}`))
+					_ = w.Write([]byte(`{"login":"testuser"}`))
 				}
 			}))
 			defer server.Close()

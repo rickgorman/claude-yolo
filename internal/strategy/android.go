@@ -20,7 +20,7 @@ func NewAndroidStrategy() *AndroidStrategy {
 }
 
 // Detect runs the Android detection script.
-func (s *AndroidStrategy) Detect(projectPath string) (int, string, error) {
+func (s *AndroidStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "android", projectPath)
 	if err != nil {
 		return 0, "", FormatError("android", "detect", err)

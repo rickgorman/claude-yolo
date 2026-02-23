@@ -10,11 +10,11 @@ import (
 
 // VolumeMount represents a Docker volume mount.
 type VolumeMount struct {
-	Type        string // "bind" or "volume"
-	Source      string // host path or volume name
-	Target      string // container path
-	ReadOnly    bool
-	CreateHost  bool // whether to create host directory if it doesn't exist
+	Type       string // "bind" or "volume"
+	Source     string // host path or volume name
+	Target     string // container path
+	ReadOnly   bool
+	CreateHost bool // whether to create host directory if it doesn't exist
 }
 
 // EnsureVolume ensures a Docker volume exists, creating it if necessary.

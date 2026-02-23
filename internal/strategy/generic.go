@@ -16,7 +16,7 @@ func NewGenericStrategy() *GenericStrategy {
 }
 
 // Detect runs the Generic detection script (always returns 0).
-func (s *GenericStrategy) Detect(projectPath string) (int, string, error) {
+func (s *GenericStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "generic", projectPath)
 	if err != nil {
 		return 0, "", FormatError("generic", "detect", err)

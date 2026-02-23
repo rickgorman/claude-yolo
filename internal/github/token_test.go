@@ -102,7 +102,7 @@ func TestFindToken(t *testing.T) {
 		if err != nil {
 			t.Skip("Cannot write to home .env")
 		}
-		defer os.Remove(homeEnv)
+		defer func() { _ = os.Remove(homeEnv) }()
 
 		result, err := FindToken(tmpProjectDir)
 		if err != nil {

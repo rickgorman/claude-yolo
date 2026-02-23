@@ -17,7 +17,7 @@ func ExampleClient_Run() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Configure the container
 	cfg := container.RunConfig{
@@ -42,6 +42,7 @@ func ExampleClient_Run() {
 
 	containerID, err := client.Run(ctx, cfg)
 	if err != nil {
+		_ = client.Close()
 		log.Fatal(err)
 	}
 
@@ -95,10 +96,11 @@ func ExampleClient_Uptime() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	uptime, err := client.Uptime(ctx, "my-container")
 	if err != nil {
+		_ = client.Close()
 		log.Fatal(err)
 	}
 

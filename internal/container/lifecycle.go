@@ -77,7 +77,7 @@ func (c *Client) Attach(ctx context.Context, containerID string, interactive boo
 	// Handle stdin if interactive
 	if interactive {
 		go func() {
-			io.Copy(hijackedResp.Conn, os.Stdin)
+			_ = io.Copy(hijackedResp.Conn, os.Stdin)
 		}()
 	}
 
@@ -111,7 +111,7 @@ func (c *Client) Exists(ctx context.Context, name string) (bool, error) {
 	for _, ctr := range containers {
 		for _, ctrName := range ctr.Names {
 			// Docker container names start with "/"
-			if len(ctrName) > 0 && ctrName[0] == '/' {
+			if ctrName != "" && ctrName[0] == '/' {
 				ctrName = ctrName[1:]
 			}
 			if ctrName == name {
@@ -133,7 +133,7 @@ func (c *Client) IsRunning(ctx context.Context, name string) (bool, error) {
 	for _, ctr := range containers {
 		for _, ctrName := range ctr.Names {
 			// Docker container names start with "/"
-			if len(ctrName) > 0 && ctrName[0] == '/' {
+			if ctrName != "" && ctrName[0] == '/' {
 				ctrName = ctrName[1:]
 			}
 			if ctrName == name {

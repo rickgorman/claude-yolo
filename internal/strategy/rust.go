@@ -19,7 +19,7 @@ func NewRustStrategy() *RustStrategy {
 }
 
 // Detect runs the Rust detection script.
-func (s *RustStrategy) Detect(projectPath string) (int, string, error) {
+func (s *RustStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "rust", projectPath)
 	if err != nil {
 		return 0, "", FormatError("rust", "detect", err)

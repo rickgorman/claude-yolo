@@ -23,7 +23,7 @@ func NewPythonStrategy() *PythonStrategy {
 }
 
 // Detect runs the Python detection script.
-func (s *PythonStrategy) Detect(projectPath string) (int, string, error) {
+func (s *PythonStrategy) Detect(projectPath string) (confidence int, message string, err error) {
 	confidence, evidence, err := runDetectScript(s.strategiesDir, "python", projectPath)
 	if err != nil {
 		return 0, "", FormatError("python", "detect", err)
@@ -40,7 +40,7 @@ func (s *PythonStrategy) Volumes(hash string) []VolumeMount {
 
 // EnvVars returns the environment variables needed for Python.
 func (s *PythonStrategy) EnvVars(projectPath string) ([]EnvVar, error) {
-	pythonVersion, err := detectPythonVersion(projectPath)
+	pythonVersion := detectPythonVersion(projectPath)
 	if err != nil {
 		return nil, FormatError("python", "detect python version", err)
 	}
@@ -59,7 +59,7 @@ func (s *PythonStrategy) DefaultPorts() []PortMapping {
 
 // InfoMessage returns the info message to display when starting Python container.
 func (s *PythonStrategy) InfoMessage(projectPath string) (string, error) {
-	pythonVersion, err := detectPythonVersion(projectPath)
+	pythonVersion := detectPythonVersion(projectPath)
 	if err != nil {
 		return "", FormatError("python", "detect python version", err)
 	}
@@ -68,13 +68,13 @@ func (s *PythonStrategy) InfoMessage(projectPath string) (string, error) {
 }
 
 // detectPythonVersion detects the Python version from project files.
-func detectPythonVersion(projectPath string) (string, error) {
+func detectPythonVersion(projectPath string) string {
 	// Check .python-version
 	pythonVersionFile := filepath.Join(projectPath, ".python-version")
 	if data, err := os.ReadFile(pythonVersionFile); err == nil {
 		version := strings.TrimSpace(string(data))
 		if version != "" {
-			return version, nil
+			return version
 		}
 	}
 

@@ -11,19 +11,25 @@ import (
 )
 
 const (
+	// BoxWidth is the width of the formatted output box in characters.
 	BoxWidth = 46
 )
 
 var (
-	// Color/style functions
-	Bold   = color.New(color.Bold).SprintFunc()
-	Dim    = color.New(color.Faint).SprintFunc()
-	Green  = color.New(color.FgGreen).SprintFunc()
-	Cyan   = color.New(color.FgCyan).SprintFunc()
+	// Bold formats text in bold style.
+	Bold = color.New(color.Bold).SprintFunc()
+	// Dim formats text in dimmed style.
+	Dim = color.New(color.Faint).SprintFunc()
+	// Green formats text in green color.
+	Green = color.New(color.FgGreen).SprintFunc()
+	// Cyan formats text in cyan color.
+	Cyan = color.New(color.FgCyan).SprintFunc()
+	// Yellow formats text in yellow color.
 	Yellow = color.New(color.FgYellow).SprintFunc()
-	Red    = color.New(color.FgRed).SprintFunc()
+	// Red formats text in red color.
+	Red = color.New(color.FgRed).SprintFunc()
 
-	// Output destination (defaults to stderr to match bash script)
+	// Out is the output destination (defaults to stderr to match bash script).
 	Out io.Writer = os.Stderr
 )
 
@@ -64,7 +70,7 @@ func Warn(format string, args ...interface{}) {
 	_, _ = fmt.Fprintf(Out, "  %s○%s %s\n", Yellow(""), Dim(""), msg)
 }
 
-// Dim prints a dimmed message.
+// DimMsg prints a dimmed message.
 func DimMsg(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	_, _ = fmt.Fprintf(Out, "  %s\n", Dim(msg))

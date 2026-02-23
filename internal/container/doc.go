@@ -3,25 +3,25 @@
 // The package provides four main components:
 //
 // 1. Docker Client Wrapper (docker.go)
-//    - Simplified interface to Docker SDK
-//    - Image and volume operations
-//    - Container discovery
+//   - Simplified interface to Docker SDK
+//   - Image and volume operations
+//   - Container discovery
 //
 // 2. Container Lifecycle (lifecycle.go)
-//    - Run, attach, and remove containers
-//    - Container existence and running state checks
-//    - Uptime calculation
+//   - Run, attach, and remove containers
+//   - Container existence and running state checks
+//   - Uptime calculation
 //
 // 3. Port Management (ports.go)
-//    - Port conflict detection using lsof
-//    - Automatic port remapping (base+1000, then base+1..base+100)
-//    - Interactive prompts or headless auto-remap
-//    - Platform-specific networking (macOS vs Linux)
+//   - Port conflict detection using lsof
+//   - Automatic port remapping (base+1000, then base+1..base+100)
+//   - Interactive prompts or headless auto-remap
+//   - Platform-specific networking (macOS vs Linux)
 //
 // 4. Volume Management (volumes.go)
-//    - Bind mounts and named volumes
-//    - Automatic host directory creation
-//    - Common volume setup for all containers
+//   - Bind mounts and named volumes
+//   - Automatic host directory creation
+//   - Common volume setup for all containers
 //
 // Basic usage:
 //

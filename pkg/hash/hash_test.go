@@ -88,19 +88,19 @@ func TestCDPPortForHash(t *testing.T) {
 
 func TestMD5Sum(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{
-			name: "empty string",
+			name:  "empty string",
 			input: "",
-			want: "d41d8cd98f00b204e9800998ecf8427e",
+			want:  "d41d8cd98f00b204e9800998ecf8427e",
 		},
 		{
-			name: "hello",
+			name:  "hello",
 			input: "hello",
-			want: "5d41402abc4b2a76b9719d911017c592",
+			want:  "5d41402abc4b2a76b9719d911017c592",
 		},
 	}
 
@@ -116,19 +116,19 @@ func TestMD5Sum(t *testing.T) {
 
 func TestSHA1Sum(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{
-			name: "empty string",
+			name:  "empty string",
 			input: "",
-			want: "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+			want:  "da39a3ee5e6b4b0d3255bfef95601890afd80709",
 		},
 		{
-			name: "hello",
+			name:  "hello",
 			input: "hello",
-			want: "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d",
+			want:  "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d",
 		},
 	}
 

@@ -77,7 +77,7 @@ func DetectPortConflicts(portMappings []PortMapping) []PortConflict {
 }
 
 // getPortProcess gets the process name and PID using a port.
-func getPortProcess(port int) (string, string) {
+func getPortProcess(port int) (processName string, pid string) {
 	cmd := exec.Command("lsof", "-i", fmt.Sprintf(":%d", port), "-sTCP:LISTEN", "-t")
 	output, err := cmd.Output()
 	if err != nil {
@@ -156,8 +156,8 @@ func ResolvePortConflicts(portMappings []PortMapping, autoRemap bool) ([]PortMap
 				ui.DimMsg("    %d → %d", c.Port, c.Suggestion)
 			}
 			ui.BlankLine()
-			fmt.Fprintf(ui.Out, "    %s1%s  Remap to suggested ports\n", ui.Bold(""), ui.Dim(""))
-			fmt.Fprintf(ui.Out, "    %s2%s  Continue anyway (docker may fail)\n", ui.Bold(""), ui.Dim(""))
+			_ = fmt.Fprintf(ui.Out, "    %s1%s  Remap to suggested ports\n", ui.Bold(""), ui.Dim(""))
+			_ = fmt.Fprintf(ui.Out, "    %s2%s  Continue anyway (docker may fail)\n", ui.Bold(""), ui.Dim(""))
 			ui.BlankLine()
 
 			choice := promptChoice("  Press ENTER to remap, or select [1-2]: ")
@@ -204,7 +204,7 @@ func applyPortRemapping(portMappings []PortMapping, conflicts []PortConflict) []
 
 // promptChoice prompts the user for input and returns their choice.
 func promptChoice(prompt string) string {
-	fmt.Fprint(ui.Out, prompt)
+	_ = fmt.Fprint(ui.Out, prompt)
 
 	reader := bufio.NewReader(os.Stdin)
 	choice, err := reader.ReadString('\n')

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
-	"github.com/rickgorman/claude-yolo/internal/cli"
 	"github.com/rickgorman/claude-yolo/internal/chrome"
+	"github.com/rickgorman/claude-yolo/internal/cli"
 	"github.com/rickgorman/claude-yolo/internal/container"
 	"github.com/rickgorman/claude-yolo/internal/git"
 	"github.com/rickgorman/claude-yolo/internal/github"
@@ -111,7 +112,7 @@ func handleYoloMode(args *cli.Args) {
 		ui.Footer()
 		os.Exit(1)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	// Handle --reset: remove existing containers
 	if args.ResetMode {
@@ -124,7 +125,7 @@ func handleYoloMode(args *cli.Args) {
 	}
 
 	// Migrate legacy yolo sessions
-	session.MigrateYoloSessions()
+	_ = session.MigrateYoloSessions()
 
 	// Check for already-running container
 	running, err := dockerClient.IsRunning(ctx, containerName)
@@ -147,6 +148,7 @@ func handleYoloMode(args *cli.Args) {
 		if err := startContainer(ctx, dockerClient, containerName, args.ClaudeArgs); err != nil {
 			ui.Fail("Failed to start container: %v", err)
 			ui.Footer()
+			_ = dockerClient.Close()
 			os.Exit(1)
 		}
 		return
@@ -177,7 +179,7 @@ func handleYoloMode(args *cli.Args) {
 
 	// Get strategy instance
 	detector := strategy.NewDetector(getStrategiesDir())
-	strat, err := detector.GetStrategy(strategyName)
+	strategy, err := detector.GetStrategy(strategyName)
 	if err != nil {
 		ui.Fail("Invalid strategy: %s", strategyName)
 		ui.Info("Available strategies: rails, node, python, go, rust, android, jekyll, generic")
@@ -202,7 +204,7 @@ func handleYoloMode(args *cli.Args) {
 	}
 
 	// Build image if needed
-	imageName := buildImageIfNeeded(ctx, dockerClient, strat, pathHash, yoloConfig, args)
+	imageName := buildImageIfNeeded(ctx, dockerClient, strategy, pathHash, yoloConfig, args)
 	if imageName == "" {
 		ui.Fail("Failed to build image")
 		ui.Footer()
@@ -220,7 +222,7 @@ func handleYoloMode(args *cli.Args) {
 	}
 
 	// Run container
-	runContainer(ctx, dockerClient, strat, imageName, containerName, pathHash, worktreePath, yoloConfig, args)
+	runContainer(ctx, dockerClient, strategy, imageName, containerName, pathHash, worktreePath, yoloConfig, args)
 }
 
 func ensureGitHubToken(worktreePath string, trustGitHubToken bool) error {
@@ -239,7 +241,7 @@ func ensureGitHubToken(worktreePath string, trustGitHubToken bool) error {
 	}
 
 	if !validation.Valid {
-		return fmt.Errorf(github.FormatError(err, tokenResult.Source))
+		return errors.New(github.FormatError(err, tokenResult.Source))
 	}
 
 	// Warn about broad scopes
@@ -251,7 +253,7 @@ func ensureGitHubToken(worktreePath string, trustGitHubToken bool) error {
 	return nil
 }
 
-func buildImageIfNeeded(ctx context.Context, dockerClient *container.Client, strat strategy.Strategy, pathHash string, yoloConfig *yoloconfig.Config, args *cli.Args) string {
+func buildImageIfNeeded(ctx context.Context, dockerClient *container.Client, strategy strategy.Strategy, pathHash string, yoloConfig *yoloconfig.Config, args *cli.Args) string {
 	imageName := "yolo-" + pathHash
 
 	// Check if image exists
@@ -281,7 +283,7 @@ func buildImageIfNeeded(ctx context.Context, dockerClient *container.Client, str
 	ui.Info("Building image: %s", imageName)
 
 	// Get Dockerfile path
-	dockerfilePath := filepath.Join(getStrategiesDir(), strat.Name(), "Dockerfile")
+	dockerfilePath := filepath.Join(getStrategiesDir(), strategy.Name(), "Dockerfile")
 	if yoloConfig != nil && yoloConfig.Dockerfile != "" {
 		dockerfilePath = yoloConfig.Dockerfile
 	}
@@ -342,15 +344,15 @@ func createTarContext(dockerfilePath string) (io.Reader, error) {
 	return &buf, nil
 }
 
-func runContainer(ctx context.Context, dockerClient *container.Client, strat strategy.Strategy, imageName, containerName, pathHash, worktreePath string, yoloConfig *yoloconfig.Config, args *cli.Args) {
+func runContainer(ctx context.Context, dockerClient *container.Client, strategy strategy.Strategy, imageName, containerName, pathHash, worktreePath string, yoloConfig *yoloconfig.Config, args *cli.Args) {
 	// Build environment variables
-	env := buildEnvironment(strat, worktreePath, yoloConfig, args)
+	env := buildEnvironment(strategy, worktreePath, yoloConfig, args)
 
 	// Build volume mounts
-	volumes := buildVolumes(strat, pathHash, worktreePath)
+	volumes := buildVolumes(strategy, pathHash, worktreePath)
 
 	// Build port mappings
-	ports := buildPortMappings(strat, pathHash, yoloConfig, args)
+	ports := buildPortMappings(strategy, pathHash, yoloConfig, args)
 
 	// Check for port conflicts
 	conflicts := container.DetectPortConflicts(ports)
@@ -401,7 +403,7 @@ func runContainer(ctx context.Context, dockerClient *container.Client, strat str
 	}
 }
 
-func attachToContainer(dockerClient *container.Client, containerName string, claudeArgs []string) {
+func attachToContainer(dockerClient *container.Client, containerName string, _ []string) {
 	ctx := context.Background()
 
 	// Show uptime
@@ -418,17 +420,17 @@ func attachToContainer(dockerClient *container.Client, containerName string, cla
 	}
 }
 
-func startContainer(ctx context.Context, dockerClient *container.Client, containerName string, claudeArgs []string) error {
+func startContainer(ctx context.Context, dockerClient *container.Client, containerName string, _ []string) error {
 	// For now, we'll just attach - the container package handles starting
 	ui.Footer()
 	return dockerClient.Attach(ctx, containerName, true)
 }
 
-func buildEnvironment(strat strategy.Strategy, worktreePath string, yoloConfig *yoloconfig.Config, args *cli.Args) []string {
+func buildEnvironment(strategy strategy.Strategy, worktreePath string, yoloConfig *yoloconfig.Config, args *cli.Args) []string {
 	var env []string
 
 	// Get strategy environment variables
-	stratEnvVars, err := strat.EnvVars(worktreePath)
+	stratEnvVars, err := strategy.EnvVars(worktreePath)
 	if err == nil {
 		for _, ev := range stratEnvVars {
 			env = append(env, ev.Key+"="+ev.Value)
@@ -464,11 +466,11 @@ func buildEnvironment(strat strategy.Strategy, worktreePath string, yoloConfig *
 	return env
 }
 
-func buildVolumes(strat strategy.Strategy, pathHash, worktreePath string) []string {
+func buildVolumes(strategy strategy.Strategy, pathHash, worktreePath string) []string {
 	var volumes []string
 
 	// Get strategy volumes
-	stratVolumes := strat.Volumes(pathHash)
+	stratVolumes := strategy.Volumes(pathHash)
 	for _, vol := range stratVolumes {
 		volumes = append(volumes, vol.Name+":"+vol.Target)
 	}
@@ -485,11 +487,11 @@ func buildVolumes(strat strategy.Strategy, pathHash, worktreePath string) []stri
 	return volumes
 }
 
-func buildPortMappings(strat strategy.Strategy, pathHash string, yoloConfig *yoloconfig.Config, args *cli.Args) []container.PortMapping {
+func buildPortMappings(strategy strategy.Strategy, pathHash string, yoloConfig *yoloconfig.Config, args *cli.Args) []container.PortMapping {
 	var mappings []container.PortMapping
 
 	// Get strategy ports
-	stratPorts := strat.DefaultPorts()
+	stratPorts := strategy.DefaultPorts()
 
 	// Override with .yolo/ ports if present
 	if yoloConfig != nil && len(yoloConfig.Ports) > 0 {
@@ -497,7 +499,7 @@ func buildPortMappings(strat strategy.Strategy, pathHash string, yoloConfig *yol
 		mappings = []container.PortMapping{} // Clear strategy ports
 		for _, portStr := range yoloConfig.Ports {
 			var port int
-			fmt.Sscanf(portStr, "%d", &port)
+			_ = fmt.Sscanf(portStr, "%d", &port)
 			if port > 0 {
 				mappings = append(mappings, container.PortMapping{
 					Host:      port,
@@ -566,7 +568,7 @@ func determineStrategy(args *cli.Args, yoloConfig *yoloconfig.Config, worktreePa
 
 func showStrategyMenu(results []strategy.DetectionResult, detector *strategy.Detector) string {
 	ui.BlankLine()
-	fmt.Fprintln(ui.Out, "  Detected:")
+	_ = fmt.Fprintln(ui.Out, "  Detected:")
 
 	for i, result := range results {
 		glyph := "○"
@@ -588,7 +590,7 @@ func showStrategyMenu(results []strategy.DetectionResult, detector *strategy.Det
 	}
 
 	otherChoice := len(results) + 1
-	fmt.Fprintf(ui.Out, "    %s  ○ %-10s        %s\n",
+	_ = fmt.Fprintf(ui.Out, "    %s  ○ %-10s        %s\n",
 		ui.Bold(fmt.Sprintf("%d", otherChoice)),
 		"other",
 		ui.Dim("see all supported / generate new"))
@@ -614,14 +616,14 @@ func chooseFromFullList(detector *strategy.Detector) string {
 	ui.BlankLine()
 	ui.Warn("No environment auto-detected")
 	ui.BlankLine()
-	fmt.Fprintln(ui.Out, "  Select an environment:")
+	_ = fmt.Fprintln(ui.Out, "  Select an environment:")
 
 	for i, name := range strategies {
 		fmt.Fprintf(ui.Out, "    %s  %-12s\n", ui.Bold(fmt.Sprintf("%d", i+1)), name)
 	}
 
 	otherChoice := len(strategies) + 1
-	fmt.Fprintf(ui.Out, "    %s  %-12s %s\n",
+	_ = fmt.Fprintf(ui.Out, "    %s  %-12s %s\n",
 		ui.Bold(fmt.Sprintf("%d", otherChoice)),
 		"other",
 		ui.Dim("generate prompt for new strategy"))
