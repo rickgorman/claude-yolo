@@ -71,21 +71,6 @@ Monitor GitHub Actions CI and automatically fix failures until all checks pass g
 
 ### Common Fixes
 
-**Shellcheck trying to lint binary**:
-```yaml
-# .github/workflows/test.yml
-- name: Lint bin/claude-yolo-bash  # Not bin/claude-yolo
-  run: shellcheck -x -S warning -e SC1090 bin/claude-yolo-bash
-```
-
-**Tests expecting bash script**:
-```bash
-# test/lib/common.sh - Auto-detect binary vs script
-if file "$CLI" 2>/dev/null | grep -q "executable"; then
-  _cli_to_source="$CLI_BASH"  # Use bash version for sourcing
-fi
-```
-
 **Go compilation errors**:
 ```bash
 # Check missing imports
@@ -397,10 +382,6 @@ GOOS=linux GOARCH=amd64 go build -o bin/claude-yolo-linux-amd64 ./cmd/claude-yol
 ---
 
 ## Common Troubleshooting
-
-### "Cannot execute binary file"
-- Bash tests trying to source Go binary
-- Solution: Tests should use `bin/claude-yolo-bash` for sourcing functions
 
 ### "Package not found"
 ```bash
