@@ -100,7 +100,7 @@ if ! docker image inspect "${IMAGE}:latest" &>/dev/null; then
   DOCKER_BUILDKIT=1 docker build \
     -t "${IMAGE}:latest" \
     -f "$REPO_DIR/strategies/generic/Dockerfile" \
-    "$REPO_DIR/strategies/generic/" >/dev/null 2>&1 || {
+    "$REPO_DIR" >/dev/null 2>&1 || {
     fail "Could not build generic image"
     exit 1
   }

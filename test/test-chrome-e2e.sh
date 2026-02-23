@@ -75,7 +75,7 @@ section "Build rails image"
 
 docker build -q -t "$IMAGE" \
   -f "$REPO_DIR/strategies/rails/Dockerfile" \
-  "$REPO_DIR/strategies/rails/" >/dev/null
+  "$REPO_DIR" >/dev/null
 
 pass "Built $IMAGE"
 
