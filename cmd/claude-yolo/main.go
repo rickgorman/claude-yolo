@@ -149,7 +149,7 @@ func handleYoloMode(args *cli.Args) {
 			ui.Fail("Failed to start container: %v", err)
 			ui.Footer()
 			_ = dockerClient.Close()
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // explicitly closing client before exit
 		}
 		return
 	}
@@ -578,7 +578,7 @@ func showStrategyMenu(results []strategy.DetectionResult, detector *strategy.Det
 			color = ui.Green
 		}
 
-		fmt.Fprintf(ui.Out, "    %s  %s %-10s %s%3d%% %s%s%s\n",
+		_, _ = fmt.Fprintf(ui.Out, "    %s  %s %-10s %s%3d%% %s%s%s\n",
 			ui.Bold(fmt.Sprintf("%d", i+1)),
 			color(glyph),
 			result.Strategy,
@@ -619,7 +619,7 @@ func chooseFromFullList(detector *strategy.Detector) string {
 	_, _ = fmt.Fprintln(ui.Out, "  Select an environment:")
 
 	for i, name := range strategies {
-		fmt.Fprintf(ui.Out, "    %s  %-12s\n", ui.Bold(fmt.Sprintf("%d", i+1)), name)
+		_, _ = fmt.Fprintf(ui.Out, "    %s  %-12s\n", ui.Bold(fmt.Sprintf("%d", i+1)), name)
 	}
 
 	otherChoice := len(strategies) + 1

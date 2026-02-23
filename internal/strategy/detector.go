@@ -158,7 +158,7 @@ func (d *Detector) DetectBestStrategy(projectPath string) (string, error) {
 }
 
 // runDetectScript executes a strategy's detect.sh script and parses the output.
-func runDetectScript(strategiesDir, strategyName, projectPath string) (int, string, error) {
+func runDetectScript(strategiesDir, strategyName, projectPath string) (confidence int, evidence string, err error) {
 	scriptPath := filepath.Join(strategiesDir, strategyName, "detect.sh")
 
 	// Check if detect.sh exists
@@ -173,9 +173,6 @@ func runDetectScript(strategiesDir, strategyName, projectPath string) (int, stri
 	}
 
 	// Parse output
-	var confidence int
-	var evidence string
-
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()

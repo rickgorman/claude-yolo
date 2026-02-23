@@ -43,7 +43,7 @@ func ExampleClient_Run() {
 	containerID, err := client.Run(ctx, cfg)
 	if err != nil {
 		_ = client.Close()
-		log.Fatal(err)
+		log.Fatal(err) //nolint:gocritic // explicitly closing client before fatal
 	}
 
 	fmt.Printf("Container created: %s\n", containerID)
@@ -101,7 +101,7 @@ func ExampleClient_Uptime() {
 	uptime, err := client.Uptime(ctx, "my-container")
 	if err != nil {
 		_ = client.Close()
-		log.Fatal(err)
+		log.Fatal(err) //nolint:gocritic // explicitly closing client before fatal
 	}
 
 	fmt.Printf("Container uptime: %s\n", uptime)
