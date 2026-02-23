@@ -13,7 +13,7 @@ func runRailsEntrypoint(args []string, log func(string)) error {
 	rbenvBin := filepath.Join(home, ".rbenv", "bin")
 	rbenvShims := filepath.Join(home, ".rbenv", "shims")
 	path := rbenvBin + ":" + rbenvShims + ":" + os.Getenv("PATH")
-	os.Setenv("PATH", path)
+	_ = os.Setenv("PATH", path)
 
 	// Install Ruby if RUBY_VERSION is set and not already installed
 	rubyVersion := os.Getenv("RUBY_VERSION")

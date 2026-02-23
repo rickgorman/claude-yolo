@@ -55,7 +55,7 @@ func Run(strategy string, args []string) error {
 }
 
 // fixVolumePermissions fixes ownership on Docker volumes
-func fixVolumePermissions(strategy string, log func(string)) error {
+func fixVolumePermissions(strategy string, _ func(string)) error {
 	claudeUID := 1000 // claude user UID
 	claudeGID := 1000 // claude group GID
 
@@ -101,7 +101,7 @@ func fixVolumePermissions(strategy string, log func(string)) error {
 }
 
 // createGitConfig creates .gitconfig from environment variables
-func createGitConfig(log func(string)) error {
+func createGitConfig(_ func(string)) error {
 	gitName := os.Getenv("GIT_USER_NAME")
 	gitEmail := os.Getenv("GIT_USER_EMAIL")
 
@@ -163,7 +163,7 @@ func setTerminalDimensions() {
 }
 
 // isTerminal checks if fd is a terminal (Unix-like systems only)
-func isTerminal(fd int) bool {
+func isTerminal(_ int) bool {
 	// Simple check: if stdin is a file, it's probably a terminal
 	fileInfo, err := os.Stdin.Stat()
 	if err != nil {

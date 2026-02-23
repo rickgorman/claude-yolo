@@ -11,7 +11,7 @@ func runNodeEntrypoint(args []string, log func(string)) error {
 
 	// Initialize nvm (requires sourcing nvm.sh)
 	nvmDir := filepath.Join(home, ".nvm")
-	os.Setenv("NVM_DIR", nvmDir)
+	_ = os.Setenv("NVM_DIR", nvmDir)
 
 	// Install Node if NODE_VERSION is set and not already installed
 	nodeVersion := os.Getenv("NODE_VERSION")
@@ -47,16 +47,17 @@ func runNodeEntrypoint(args []string, log func(string)) error {
 			[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 		`
 
-		if fileExists(bunLock) {
+		switch {
+		case fileExists(bunLock):
 			log("Running bun install...")
 			installScript += "bun install"
-		} else if fileExists(pnpmLock) {
+		case fileExists(pnpmLock):
 			log("Running pnpm install...")
 			installScript += "pnpm install --frozen-lockfile 2>/dev/null || pnpm install"
-		} else if fileExists(yarnLock) {
+		case fileExists(yarnLock):
 			log("Running yarn install...")
 			installScript += "yarn install --frozen-lockfile 2>/dev/null || yarn install"
-		} else {
+		default:
 			log("Running npm install...")
 			installScript += "npm install"
 		}

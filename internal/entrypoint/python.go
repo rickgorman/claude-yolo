@@ -14,8 +14,8 @@ func runPythonEntrypoint(args []string, log func(string)) error {
 	pyenvBin := filepath.Join(pyenvRoot, "bin")
 	pyenvShims := filepath.Join(pyenvRoot, "shims")
 	path := pyenvBin + ":" + pyenvShims + ":" + os.Getenv("PATH")
-	os.Setenv("PATH", path)
-	os.Setenv("PYENV_ROOT", pyenvRoot)
+	_ = os.Setenv("PATH", path)
+	_ = os.Setenv("PYENV_ROOT", pyenvRoot)
 
 	// Install Python if PYTHON_VERSION is set and not already installed
 	pythonVersion := os.Getenv("PYTHON_VERSION")
