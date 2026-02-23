@@ -1,9 +1,7 @@
 run:
   timeout: 5m
   tests: true
-  skip-dirs:
-    - test
-    - strategies
+  skip-dirs-use-default: true
 
 linters:
   enable:

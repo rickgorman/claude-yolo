@@ -48,12 +48,3 @@ func BenchmarkDetectPortConflicts(b *testing.B) {
 		_ = DetectPortConflicts(mappings)
 	}
 }
-
-func BenchmarkSuggestAlternativePort(b *testing.B) {
-	port := 3000
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = SuggestAlternativePort(port)
-	}
-}
