@@ -29,6 +29,12 @@ import (
 const version = "2.0.0-dev"
 
 func main() {
+	// Handle chrome subcommand before normal argument parsing
+	if len(os.Args) > 1 && os.Args[1] == "chrome" {
+		handleChromeSubcommand(os.Args[2:])
+		return
+	}
+
 	// Parse arguments
 	args, err := cli.Parse(os.Args)
 	if err != nil {
@@ -741,11 +747,61 @@ func getStrategiesDir() string {
 	return filepath.Join(getRepoDir(), "strategies")
 }
 
+func handleChromeSubcommand(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "Usage: claude-yolo chrome <command> [options]\n")
+		fmt.Fprintf(os.Stderr, "Commands: start, stop, status\n")
+		os.Exit(1)
+	}
+
+	command := args[0]
+	port := 9222
+
+	// Parse --port flag if present
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--port" && i+1 < len(args) {
+			_, _ = fmt.Sscanf(args[i+1], "%d", &port)
+		}
+	}
+
+	mgr := chrome.NewManager(port)
+
+	switch command {
+	case "start":
+		if err := mgr.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to start Chrome: %v\n", err)
+			os.Exit(1)
+		}
+	case "stop":
+		if err := mgr.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to stop Chrome: %v\n", err)
+			os.Exit(1)
+		}
+	case "status":
+		if mgr.IsRunning() {
+			fmt.Printf("Chrome CDP is running on port %d\n", port)
+		} else {
+			fmt.Printf("Chrome CDP is not running on port %d\n", port)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
+		fmt.Fprintf(os.Stderr, "Available commands: start, stop, status\n")
+		os.Exit(1)
+	}
+}
+
 func showHelp() {
 	help := `claude-yolo - AI pair programming in isolated Docker containers
 
 USAGE:
     claude-yolo [OPTIONS] [CLAUDE_ARGS...]
+    claude-yolo chrome <command> [options]
+
+CHROME COMMANDS:
+    start [--port=9222]    Start Chrome with CDP
+    stop [--port=9222]     Stop Chrome
+    status [--port=9222]   Check Chrome status
 
 OPTIONS:
     --yolo                 Enable containerized mode
