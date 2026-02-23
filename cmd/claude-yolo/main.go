@@ -558,7 +558,7 @@ func determineStrategy(args *cli.Args, yoloConfig *yoloconfig.Config, worktreePa
 	if len(results) == 1 && results[0].Confidence >= 80 {
 		top := results[0]
 		ui.Success("Detected: %s (%d%%)", ui.Bold(top.Strategy), top.Confidence)
-		ui.DimMsg(top.Evidence)
+		ui.DimMsg("%s", top.Evidence)
 		return top.Strategy
 	}
 
@@ -652,7 +652,7 @@ func promptYoloTrust(config *yoloconfig.Config) bool {
 	ui.DimMsg("Files:")
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			ui.DimMsg("  " + entry.Name())
+			ui.DimMsg("  %s", entry.Name())
 		}
 	}
 	ui.BlankLine()
@@ -670,10 +670,10 @@ func promptYoloTrust(config *yoloconfig.Config) bool {
 				continue
 			}
 			ui.BlankLine()
-			ui.DimMsg("── " + entry.Name() + " ──")
+			ui.DimMsg("── %s ──", entry.Name())
 			data, _ := os.ReadFile(filepath.Join(config.Dir, entry.Name()))
 			for _, line := range strings.Split(string(data), "\n") {
-				ui.DimMsg("    " + line)
+				ui.DimMsg("    %s", line)
 			}
 		}
 		ui.BlankLine()
@@ -705,9 +705,9 @@ func checkDependencies() {
 		ui.BlankLine()
 
 		if runtime.GOOS == "darwin" {
-			ui.DimMsg("Install with: brew install " + strings.Join(missing, " "))
+			ui.DimMsg("Install with: brew install %s", strings.Join(missing, " "))
 		} else {
-			ui.DimMsg("Install with: sudo apt-get install " + strings.Join(missing, " "))
+			ui.DimMsg("Install with: sudo apt-get install %s", strings.Join(missing, " "))
 		}
 
 		os.Exit(1)
