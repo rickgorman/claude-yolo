@@ -21,14 +21,20 @@ log "Java: $(java -version 2>&1 | head -1)"
 log "Android SDK: $ANDROID_HOME"
 log "ADB: $(adb version | head -1)"
 
-# Start ADB server
-log "Starting ADB server..."
-adb start-server
-
-# Connect to wireless device if ANDROID_DEVICE is set (ip:port)
-if [[ -n "${ANDROID_DEVICE:-}" ]]; then
-  log "Connecting to Android device at ${ANDROID_DEVICE}..."
-  adb connect "$ANDROID_DEVICE" || log "WARNING: Could not connect to device at ${ANDROID_DEVICE}"
+# ADB setup: remote host server (macOS Docker bridge) or local server
+if [[ -n "${ADB_HOST:-}" ]]; then
+  # macOS: use host's ADB server via Docker bridge
+  export ANDROID_ADB_SERVER_ADDRESS="${ADB_HOST}"
+  export ANDROID_ADB_SERVER_PORT="${ADB_PORT:-5037}"
+  log "Using host ADB server at ${ADB_HOST}:${ADB_PORT:-5037}"
+else
+  # Linux / direct: start local ADB server
+  log "Starting ADB server..."
+  adb start-server
+  if [[ -n "${ANDROID_DEVICE:-}" ]]; then
+    log "Connecting to Android device at ${ANDROID_DEVICE}..."
+    adb connect "$ANDROID_DEVICE" || log "WARNING: Could not connect to device at ${ANDROID_DEVICE}"
+  fi
 fi
 
 # List connected devices

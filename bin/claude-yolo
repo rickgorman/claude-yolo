@@ -478,6 +478,102 @@ update_ports_stored_hash() {
   rm -f "$tmp"
 }
 
+########################################
+# Android ADB preflight (macOS only)
+########################################
+
+_ADB_USE_HOST_SERVER=false
+
+preflight_android_adb() {
+  # Only runs on macOS where Docker can't reach LAN devices directly
+  if [[ "$(uname)" != "Darwin" ]]; then
+    return 0
+  fi
+
+  if ! command -v adb &>/dev/null; then
+    warn "adb not found on host — container will run its own ADB server"
+    dim "Install via: brew install android-platform-tools"
+    return 0
+  fi
+
+  info "Starting host ADB server..."
+  adb start-server 2>/dev/null || {
+    warn "Failed to start host ADB server"
+    return 0
+  }
+
+  local device_count
+  device_count=$(adb devices 2>/dev/null | tail -n +2 | grep -cv "^$" || true)
+
+  if [[ "$device_count" -gt 0 ]]; then
+    info "ADB devices on host:"
+    adb devices -l 2>/dev/null | tail -n +2 | grep -v "^$" | while read -r line; do
+      dim "  $line"
+    done || true
+    _ADB_USE_HOST_SERVER=true
+    return 0
+  fi
+
+  # No devices connected — offer wireless pairing
+  echo "" >&2
+  warn "No Android devices connected to host ADB"
+  read -p "  Pair via wireless debugging? [Y/n] " answer >&2
+  if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+    return 0
+  fi
+
+  echo "" >&2
+  dim "On your Android device: Settings → Developer Options → Wireless Debugging"
+  dim "Tap 'Pair device with pairing code' to get the pairing address and code"
+  echo "" >&2
+
+  read -p "  Pairing address (ip:port): " pair_address >&2
+  if [[ -z "$pair_address" ]]; then
+    warn "No pairing address provided, skipping"
+    return 0
+  fi
+
+  read -p "  Pairing code: " pair_code >&2
+  if [[ -z "$pair_code" ]]; then
+    warn "No pairing code provided, skipping"
+    return 0
+  fi
+
+  info "Pairing with ${pair_address}..."
+  if ! adb pair "$pair_address" "$pair_code" 2>&1; then
+    warn "Pairing failed — check the address and code"
+    return 0
+  fi
+
+  echo "" >&2
+  dim "Now use the address shown under 'Wireless Debugging' (not the pairing address)"
+  echo "" >&2
+
+  read -p "  Device address (ip:port): " device_address >&2
+  if [[ -z "$device_address" ]]; then
+    warn "No device address provided, skipping"
+    return 0
+  fi
+
+  info "Connecting to ${device_address}..."
+  if ! adb connect "$device_address" 2>&1; then
+    warn "Connection failed — check the address"
+    return 0
+  fi
+
+  # Verify
+  device_count=$(adb devices 2>/dev/null | tail -n +2 | grep -cv "^$" || true)
+  if [[ "$device_count" -gt 0 ]]; then
+    success "Device connected"
+    adb devices -l 2>/dev/null | tail -n +2 | grep -v "^$" | while read -r line; do
+      dim "  $line"
+    done || true
+    _ADB_USE_HOST_SERVER=true
+  else
+    warn "No devices detected after pairing"
+  fi
+}
+
 generate_ports_file() {
   local ports_file="$1"
   shift
@@ -1757,17 +1853,24 @@ run_with_strategy() {
 
     android)
       local gradle_volume="claude-yolo-${hash}-gradle"
+      docker_args+=(-v "${gradle_volume}:/home/claude/.gradle")
 
-      docker_args+=(
-        -v "${gradle_volume}:/home/claude/.gradle"
-        -e "ANDROID_DEVICE=${ANDROID_DEVICE:-}"
-      )
-
-      info "Worktree  ${display_worktree}"
-      if [[ -n "${ANDROID_DEVICE:-}" ]]; then
-        info "Device    ${ANDROID_DEVICE}"
+      if [[ "${_ADB_USE_HOST_SERVER:-}" == true ]]; then
+        # macOS: container uses host's ADB server via Docker bridge
+        docker_args+=(
+          -e "ADB_HOST=host.docker.internal"
+          -e "ADB_PORT=5037"
+        )
+        info "Worktree  ${display_worktree}"
+        info "ADB       host (via host.docker.internal)"
       else
-        info "Device    ${DIM}set ANDROID_DEVICE=<ip>:<port> to auto-connect${RESET}"
+        docker_args+=(-e "ANDROID_DEVICE=${ANDROID_DEVICE:-}")
+        info "Worktree  ${display_worktree}"
+        if [[ -n "${ANDROID_DEVICE:-}" ]]; then
+          info "Device    ${ANDROID_DEVICE}"
+        else
+          info "Device    ${DIM}set ANDROID_DEVICE=<ip>:<port> to auto-connect${RESET}"
+        fi
       fi
       ;;
 
@@ -2260,6 +2363,11 @@ main() {
       exit 0
     fi
     [[ -n "$strategy" ]] || { fail "No strategy selected"; exit 1; }
+  fi
+
+  # Android preflight: ensure host ADB is ready (macOS only)
+  if [[ "$strategy" == "android" ]]; then
+    preflight_android_adb
   fi
 
   # Ensure GitHub token for gh CLI inside container
