@@ -1713,6 +1713,13 @@ run_with_strategy() {
     docker_args+=(-v "${HOME}/.claude/commands:/home/claude/.claude/commands:ro")
   fi
 
+  # Mount host plugins dir at the host's original path so that absolute paths
+  # recorded by the host (in installed_plugins.json, known_marketplaces.json)
+  # resolve inside the container where HOME is /home/claude.
+  if [[ "${HOME}" != "/home/claude" ]]; then
+    docker_args+=(-v "${HOME}/.claude/plugins:${HOME}/.claude/plugins")
+  fi
+
   # If workspace is a git worktree, mount the parent .git directory
   # so the gitdir path in the .git file resolves inside the container
   local git_file="${worktree_path}/.git"
