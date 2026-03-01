@@ -93,6 +93,16 @@ assert_contains "Mounts per-project session directory" "$docker_args" "/.claude/
 assert_contains "Session dir targets -workspace" "$docker_args" ":/home/claude/.claude/projects/-workspace"
 
 ########################################
+# Tests: Host-path mount for plugin resolution
+########################################
+
+
+section "Host-path mount for plugin path resolution"
+
+# FAKE_HOME is not /home/claude, so host-path plugin mount should be added
+assert_contains "Mounts plugins at host path for plugin resolution" "$docker_args" ".claude/plugins:${FAKE_HOME}/.claude/plugins"
+
+########################################
 # Tests: Settings files mounted read-only
 ########################################
 
