@@ -1057,4 +1057,150 @@ assert_contains "--setup-token continues to launch session" "$output_setup_token
 ########################################
 
 
+########################################
+# Tests: --with-docker flag parsing
+########################################
+
+# Ensure a Docker socket exists for --with-docker tests
+_DOCKER_SOCK_CREATED=false
+if [[ ! -S /var/run/docker.sock ]]; then
+  sudo python3 -c "import socket; s=socket.socket(socket.AF_UNIX); s.bind('/var/run/docker.sock')" 2>/dev/null && _DOCKER_SOCK_CREATED=true || true
+fi
+
+
+section "--with-docker flag parsing"
+
+# --with-docker with --yolo --strategy rails: should show Docker info and mount socket
+output_docker=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --with-docker --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "--with-docker shows Docker info" "$output_docker" "Docker"
+assert_contains "--with-docker shows compose info" "$output_docker" "compose"
+
+docker_exec_cmd=$(echo "$output_docker" | grep "EXEC_CMD:" || true)
+assert_contains "--with-docker mounts docker socket" "$docker_exec_cmd" "docker.sock"
+
+
+section "--with-docker docker run args"
+
+assert_contains "--with-docker socket mount path" "$docker_exec_cmd" "/var/run/docker.sock:/var/run/docker.sock"
+assert_contains "--with-docker still runs docker" "$docker_exec_cmd" "docker run"
+assert_contains "--with-docker uses rails image" "$docker_exec_cmd" "claude-yolo-rails"
+
+
+section "Without --with-docker, no socket mount"
+
+# --yolo --strategy rails WITHOUT --with-docker: should NOT have docker.sock mount
+output_no_docker=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+exec_no_docker=$(echo "$output_no_docker" | grep "EXEC_CMD:" || true)
+assert_not_contains "Without --with-docker, no socket mount" "$exec_no_docker" "docker.sock"
+
+
+section "--with-docker flag order independence"
+
+# --with-docker before --yolo
+output_order_docker1=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --with-docker --yolo --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "--with-docker before --yolo works" "$output_order_docker1" "compose"
+order1_docker_exec=$(echo "$output_order_docker1" | grep "EXEC_CMD:" || true)
+assert_contains "--with-docker before --yolo has socket mount" "$order1_docker_exec" "docker.sock"
+
+# --with-docker after --strategy
+output_order_docker2=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --strategy rails --with-docker 2>&1
+' 2>&1 || true)
+
+assert_contains "--with-docker after --strategy works" "$output_order_docker2" "compose"
+order2_docker_exec=$(echo "$output_order_docker2" | grep "EXEC_CMD:" || true)
+assert_contains "--with-docker after --strategy has socket mount" "$order2_docker_exec" "docker.sock"
+
+
+section "--with-docker combined with --chrome"
+
+output_docker_chrome=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --yolo --with-docker --chrome --strategy rails 2>&1
+' 2>&1 || true)
+
+assert_contains "--with-docker + --chrome shows Docker info" "$output_docker_chrome" "compose"
+assert_contains "--with-docker + --chrome shows Chrome info" "$output_docker_chrome" "Chrome CDP"
+docker_chrome_exec=$(echo "$output_docker_chrome" | grep "EXEC_CMD:" || true)
+assert_contains "--with-docker + --chrome has socket mount" "$docker_chrome_exec" "docker.sock"
+assert_contains "--with-docker + --chrome has .mcp.json" "$docker_chrome_exec" ".mcp.json:ro"
+
+
+section "--with-docker without --yolo"
+
+# Without --yolo, --with-docker has no effect
+output_docker_no_yolo=$(bash -c '
+  '"$_chrome_mock_prefix"'
+  curl() {
+    case "$*" in
+      *api.github.com*) echo "200"; return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f curl
+  cd "'"$RAILS_DIR"'"
+  bash "'"$CLI"'" --with-docker 2>&1
+' 2>&1 || true)
+
+assert_not_contains "--with-docker without --yolo has no Docker info" "$output_docker_no_yolo" "compose (socket mount)"
+assert_not_contains "--with-docker without --yolo has no header" "$output_docker_no_yolo" "claude·yolo"
+
+# Cleanup fake socket
+if [[ "$_DOCKER_SOCK_CREATED" == true ]]; then
+  sudo rm -f /var/run/docker.sock 2>/dev/null || true
+fi
+
 print_summary "$(basename "$0" .sh)"
