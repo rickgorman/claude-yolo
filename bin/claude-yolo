@@ -1831,6 +1831,15 @@ run_with_strategy() {
     fi
   fi
 
+  # Docker socket mount (--with-docker)
+  if [[ "$docker_mode" == true ]]; then
+    if [[ -S /var/run/docker.sock ]]; then
+      docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+    else
+      warn "Docker socket not found at /var/run/docker.sock"
+    fi
+  fi
+
   # Strategy-specific volumes and env vars
   local display_worktree="${worktree_path/#$HOME/\~}"
   case "$strategy" in
@@ -1992,6 +2001,11 @@ CDPJSON
 
     docker_args+=(-v "${mcp_config}:/workspace/.mcp.json:ro")
     info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
+  fi
+
+  # Docker compose info
+  if [[ "$docker_mode" == true ]]; then
+    info "Docker    ${DIM}compose (socket mount)${RESET}"
   fi
 
   # Show published ports
