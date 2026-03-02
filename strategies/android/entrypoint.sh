@@ -17,6 +17,21 @@ if [[ -n "${GIT_USER_NAME:-}" || -n "${GIT_USER_EMAIL:-}" ]]; then
 EOF
 fi
 
+# Fix Docker socket permissions for --with-docker
+if [[ "$(id -u)" == "0" ]] && [[ -S /var/run/docker.sock ]]; then
+  SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+  if ! getent group "$SOCK_GID" >/dev/null 2>&1; then
+    groupadd -g "$SOCK_GID" dockerhost
+  fi
+  usermod -aG "$SOCK_GID" claude
+elif [[ -S /var/run/docker.sock ]]; then
+  SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+  if ! id -nG claude 2>/dev/null | grep -qw "$SOCK_GID"; then
+    sudo groupadd -g "$SOCK_GID" dockerhost 2>/dev/null || true
+    sudo usermod -aG "$SOCK_GID" claude 2>/dev/null || true
+  fi
+fi
+
 log "Java: $(java -version 2>&1 | head -1)"
 log "Android SDK: $ANDROID_HOME"
 log "ADB: $(adb version | head -1)"
