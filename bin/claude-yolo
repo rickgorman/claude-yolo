@@ -4,6 +4,7 @@
 #
 # Usage:
 #   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
+#              [--with-docker]
 #              [--env KEY=VALUE]... [--env-file <path>]...
 #              [--trust-github-token] [--trust-yolo] [--reset]
 #              [--setup-token]
@@ -15,6 +16,7 @@
 #   --build             Force rebuild the Docker image before running
 #   --verbose           Show raw Docker build output instead of spinner
 #   --chrome            Enable Chrome DevTools MCP server for browser control
+#   --with-docker        Mount Docker socket for docker compose control
 #   --env KEY=VALUE     Inject env var into the container (repeatable)
 #   --env-file <path>   Inject env vars from a dotenv-style file (repeatable)
 #   --trust-github-token  Skip broad-scope GitHub token warnings
@@ -2146,6 +2148,7 @@ show_help() {
   ${BOLD}Modes:${RESET}
     -p, --print              Headless mode — drop TTY, pass -p to Claude
     --chrome                 Enable Chrome DevTools MCP server for browser control
+    --with-docker                Mount Docker socket for docker compose control
 
   ${BOLD}Setup:${RESET}
     --setup-token            Run Claude OAuth setup and save credentials
@@ -2169,6 +2172,7 @@ main() {
   local force_strategy=""
   local verbose=false
   local chrome_mode=false
+  local docker_mode=false
   local headless_mode=false
   local trust_github_token=false
   local trust_yolo=false
@@ -2208,6 +2212,10 @@ main() {
         ;;
       --chrome)
         chrome_mode=true
+        shift
+        ;;
+      --with-docker)
+        docker_mode=true
         shift
         ;;
       --env)
