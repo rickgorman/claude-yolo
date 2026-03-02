@@ -52,6 +52,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update && apt-get install -y gh
 
+# Docker CLI + Compose plugin (for --with-docker socket mount)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian bookworm stable" \
+      | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update && apt-get install -y docker-ce-cli docker-compose-plugin
+
 # Claude Code CLI
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g @anthropic-ai/claude-code
