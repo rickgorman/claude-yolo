@@ -22,6 +22,18 @@ if [[ "$(id -u)" == "0" ]]; then
 EOF
     chown claude:claude /home/claude/.gitconfig
   fi
+
+  # Fix Docker socket permissions for --with-docker
+  if [[ -S /var/run/docker.sock ]]; then
+    SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    SOCK_GROUP=$(getent group "$SOCK_GID" | cut -d: -f1 || true)
+    if [[ -z "${SOCK_GROUP:-}" ]]; then
+      SOCK_GROUP=dockerhost
+      groupadd -g "$SOCK_GID" "$SOCK_GROUP"
+    fi
+    usermod -aG "$SOCK_GROUP" claude
+  fi
+
   exec gosu claude "$0" "$@"
 fi
 

@@ -4,6 +4,7 @@
 #
 # Usage:
 #   claude-yolo [--yolo] [--strategy <name>] [--build] [--verbose] [--chrome]
+#              [--with-docker]
 #              [--env KEY=VALUE]... [--env-file <path>]...
 #              [--trust-github-token] [--trust-yolo] [--reset]
 #              [--setup-token]
@@ -15,6 +16,7 @@
 #   --build             Force rebuild the Docker image before running
 #   --verbose           Show raw Docker build output instead of spinner
 #   --chrome            Enable Chrome DevTools MCP server for browser control
+#   --with-docker        Mount Docker socket for docker compose control
 #   --env KEY=VALUE     Inject env var into the container (repeatable)
 #   --env-file <path>   Inject env vars from a dotenv-style file (repeatable)
 #   --trust-github-token  Skip broad-scope GitHub token warnings
@@ -1829,6 +1831,15 @@ run_with_strategy() {
     fi
   fi
 
+  # Docker socket mount (--with-docker)
+  if [[ "$docker_mode" == true ]]; then
+    if [[ -S /var/run/docker.sock ]]; then
+      docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+    else
+      warn "Docker socket not found at /var/run/docker.sock"
+    fi
+  fi
+
   # Strategy-specific volumes and env vars
   local display_worktree="${worktree_path/#$HOME/\~}"
   case "$strategy" in
@@ -1992,6 +2003,11 @@ CDPJSON
     info "Chrome CDP  ${DIM}port ${cdp_port} · MCP: chrome-devtools${RESET}"
   fi
 
+  # Docker compose info
+  if [[ "$docker_mode" == true ]]; then
+    info "Docker    ${DIM}compose (socket mount)${RESET}"
+  fi
+
   # Show published ports
   if [[ ${#port_flags[@]} -gt 0 ]]; then
     local ports_display=""
@@ -2146,6 +2162,7 @@ show_help() {
   ${BOLD}Modes:${RESET}
     -p, --print              Headless mode — drop TTY, pass -p to Claude
     --chrome                 Enable Chrome DevTools MCP server for browser control
+    --with-docker                Mount Docker socket for docker compose control
 
   ${BOLD}Setup:${RESET}
     --setup-token            Run Claude OAuth setup and save credentials
@@ -2169,6 +2186,7 @@ main() {
   local force_strategy=""
   local verbose=false
   local chrome_mode=false
+  local docker_mode=false
   local headless_mode=false
   local trust_github_token=false
   local trust_yolo=false
@@ -2208,6 +2226,10 @@ main() {
         ;;
       --chrome)
         chrome_mode=true
+        shift
+        ;;
+      --with-docker)
+        docker_mode=true
         shift
         ;;
       --env)
