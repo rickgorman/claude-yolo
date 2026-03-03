@@ -20,15 +20,21 @@ fi
 # Fix Docker socket permissions for --with-docker
 if [[ "$(id -u)" == "0" ]] && [[ -S /var/run/docker.sock ]]; then
   SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
-  if ! getent group "$SOCK_GID" >/dev/null 2>&1; then
-    groupadd -g "$SOCK_GID" dockerhost
+  SOCK_GROUP=$(getent group "$SOCK_GID" | cut -d: -f1 || true)
+  if [[ -z "${SOCK_GROUP:-}" ]]; then
+    SOCK_GROUP=dockerhost
+    groupadd -g "$SOCK_GID" "$SOCK_GROUP"
   fi
-  usermod -aG "$SOCK_GID" claude
+  usermod -aG "$SOCK_GROUP" claude
 elif [[ -S /var/run/docker.sock ]]; then
   SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
-  if ! id -nG claude 2>/dev/null | grep -qw "$SOCK_GID"; then
-    sudo groupadd -g "$SOCK_GID" dockerhost 2>/dev/null || true
-    sudo usermod -aG "$SOCK_GID" claude 2>/dev/null || true
+  SOCK_GROUP=$(getent group "$SOCK_GID" | cut -d: -f1 || true)
+  if [[ -z "${SOCK_GROUP:-}" ]]; then
+    SOCK_GROUP=dockerhost
+    sudo groupadd -g "$SOCK_GID" "$SOCK_GROUP" 2>/dev/null || true
+  fi
+  if ! id -nG claude 2>/dev/null | grep -qw "$SOCK_GROUP"; then
+    sudo usermod -aG "$SOCK_GROUP" claude 2>/dev/null || true
   fi
 fi
 

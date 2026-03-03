@@ -1063,10 +1063,18 @@ assert_contains "--setup-token continues to launch session" "$output_setup_token
 
 # Ensure a Docker socket exists for --with-docker tests
 _DOCKER_SOCK_CREATED=false
-if [[ ! -S /var/run/docker.sock ]]; then
-  sudo python3 -c "import socket; s=socket.socket(socket.AF_UNIX); s.bind('/var/run/docker.sock')" 2>/dev/null && _DOCKER_SOCK_CREATED=true || true
+_DOCKER_SOCK_AVAILABLE=false
+if [[ -S /var/run/docker.sock ]]; then
+  _DOCKER_SOCK_AVAILABLE=true
+elif command -v sudo >/dev/null 2>&1 && [[ -w /var/run ]]; then
+  if sudo python3 -c "import socket; s=socket.socket(socket.AF_UNIX); s.bind('/var/run/docker.sock')" 2>/dev/null; then
+    _DOCKER_SOCK_CREATED=true
+    _DOCKER_SOCK_AVAILABLE=true
+  fi
 fi
 
+
+if [[ "$_DOCKER_SOCK_AVAILABLE" == true ]]; then
 
 section "--with-docker flag parsing"
 
@@ -1197,6 +1205,8 @@ output_docker_no_yolo=$(bash -c '
 
 assert_not_contains "--with-docker without --yolo has no Docker info" "$output_docker_no_yolo" "compose (socket mount)"
 assert_not_contains "--with-docker without --yolo has no header" "$output_docker_no_yolo" "claude·yolo"
+
+fi # _DOCKER_SOCK_AVAILABLE
 
 # Cleanup fake socket
 if [[ "$_DOCKER_SOCK_CREATED" == true ]]; then
