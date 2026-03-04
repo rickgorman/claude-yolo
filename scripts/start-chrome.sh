@@ -83,6 +83,7 @@ main() {
   "$chrome_path" \
     --headless=new \
     --remote-debugging-port="${CDP_PORT}" \
+    --remote-debugging-address=0.0.0.0 \
     --user-data-dir="$user_data_dir" \
     --no-first-run \
     --no-default-browser-check \

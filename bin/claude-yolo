@@ -2281,7 +2281,9 @@ main() {
 
   # Normal mode: pass through to native claude
   if [[ "$yolo_mode" == false ]]; then
-    exec claude ${claude_args[@]+"${claude_args[@]}"}
+    local passthrough_flags=()
+    [[ "$chrome_mode" == true ]] && passthrough_flags+=(--chrome)
+    exec claude ${passthrough_flags[@]+"${passthrough_flags[@]}"} ${claude_args[@]+"${claude_args[@]}"}
   fi
 
   # YOLO mode
