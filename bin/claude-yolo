@@ -486,6 +486,88 @@ update_ports_stored_hash() {
 
 _ADB_USE_HOST_SERVER=false
 
+generate_qr_pairing_code() {
+  # Generate random alphanumeric service name (6 chars)
+  _QR_SERVICE_NAME=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 6)
+  # Generate random numeric password (6 digits)
+  _QR_PASSWORD=$(head -c 500 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 6)
+
+  local qr_string="WIFI:T:ADB;S:${_QR_SERVICE_NAME};P:${_QR_PASSWORD};;"
+
+  echo "" >&2
+  dim "On your phone: Developer Options → Wireless Debugging → Pair with QR code"
+  echo "" >&2
+  qrencode -t ANSIUTF8 -m 2 "$qr_string" >&2
+  echo "" >&2
+  dim "Scan this QR code with your Android device"
+  dim "Press 'm' for manual pairing, or 'q' to skip"
+}
+
+wait_for_mdns_pair() {
+  local password="$1"
+  local timeout=60
+  local elapsed=0
+  local interval=2
+
+  # Check mDNS support
+  if ! adb mdns check 2>/dev/null | grep -q "mdns daemon"; then
+    warn "ADB mDNS not available — falling back to manual pairing"
+    return 1
+  fi
+
+  info "Waiting for device to appear (${timeout}s timeout)..."
+
+  while [[ $elapsed -lt $timeout ]]; do
+    # Check for user keypress (m for manual, q for quit) — non-blocking
+    if read -t 0 -n 1; then
+      read -n 1 key
+      if [[ "$key" == "m" || "$key" == "M" ]]; then return 1; fi
+      if [[ "$key" == "q" || "$key" == "Q" ]]; then return 2; fi
+    fi
+
+    # Look for pairing service in mDNS
+    local services
+    services=$(adb mdns services 2>/dev/null || true)
+    local pair_line
+    pair_line=$(echo "$services" | grep "_adb-tls-pairing" | head -1 || true)
+
+    if [[ -n "$pair_line" ]]; then
+      # Extract ip:port from the service line
+      local pair_addr
+      pair_addr=$(echo "$pair_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
+
+      if [[ -n "$pair_addr" ]]; then
+        info "Device found! Pairing with ${pair_addr}..."
+        if adb pair "$pair_addr" "$password" 2>&1; then
+          success "Paired successfully"
+
+          # Now wait briefly for connect service and auto-connect
+          sleep 2
+          local connect_line
+          connect_line=$(adb mdns services 2>/dev/null | grep "_adb-tls-connect" | head -1 || true)
+          local connect_addr
+          connect_addr=$(echo "$connect_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
+
+          if [[ -n "$connect_addr" ]]; then
+            info "Connecting to ${connect_addr}..."
+            adb connect "$connect_addr" 2>&1
+          fi
+          return 0
+        else
+          warn "Pairing failed"
+          return 1
+        fi
+      fi
+    fi
+
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+
+  warn "Timed out waiting for device"
+  return 1
+}
+
 preflight_android_adb() {
   # Only runs on macOS where Docker can't reach LAN devices directly
   if [[ "$(uname)" != "Darwin" ]]; then
@@ -524,6 +606,44 @@ preflight_android_adb() {
     return 0
   fi
 
+  # Try QR code pairing first (if qrencode available)
+  if command -v qrencode &>/dev/null; then
+    generate_qr_pairing_code
+
+    local pair_result=0
+    wait_for_mdns_pair "$_QR_PASSWORD" || pair_result=$?
+
+    if [[ $pair_result -eq 0 ]]; then
+      # Success — verify device is connected
+      device_count=$(adb devices 2>/dev/null | tail -n +2 | grep -cv "^$" || true)
+      if [[ "$device_count" -gt 0 ]]; then
+        success "Device connected"
+        adb devices -l 2>/dev/null | tail -n +2 | grep -v "^$" | while read -r line; do
+          dim "  $line"
+        done || true
+        _ADB_USE_HOST_SERVER=true
+      fi
+      return 0
+    elif [[ $pair_result -eq 2 ]]; then
+      # User chose to skip
+      return 0
+    fi
+    # pair_result == 1 means fall through to manual
+    echo "" >&2
+    info "Switching to manual pairing..."
+  else
+    # No qrencode — show manual steps with helpful upgrade message
+    echo "" >&2
+    dim "┌─────────────────────────────────────────────────────┐"
+    dim "│  Tip: Install qrencode for one-scan QR pairing:     │"
+    dim "│    brew install qrencode                             │"
+    dim "│  Then just scan a code from your phone — no typing   │"
+    dim "│  IPs, ports, or codes manually.                      │"
+    dim "└─────────────────────────────────────────────────────┘"
+    echo "" >&2
+  fi
+
+  # Manual pairing fallback
   echo "" >&2
   dim "On your Android device: Settings → Developer Options → Wireless Debugging"
   dim "Tap 'Pair device with pairing code' to get the pairing address and code"
