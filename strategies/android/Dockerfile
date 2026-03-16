@@ -96,6 +96,6 @@ RUN chmod +x /home/claude/entrypoint.sh
 
 COPY --chown=claude:claude adb-qr-pair.sh /home/claude/adb-qr-pair.sh
 RUN chmod +x /home/claude/adb-qr-pair.sh \
-    && ln -s /home/claude/adb-qr-pair.sh /usr/local/bin/adb-qr-pair
+    && sudo ln -s /home/claude/adb-qr-pair.sh /usr/local/bin/adb-qr-pair
 
 ENTRYPOINT ["/home/claude/entrypoint.sh"]

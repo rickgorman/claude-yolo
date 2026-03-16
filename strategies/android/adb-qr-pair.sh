@@ -55,7 +55,7 @@ wait_for_mdns() {
 
     if [[ -n "$pair_line" ]]; then
       local pair_addr
-      pair_addr=$(echo "$pair_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
+      pair_addr=$(echo "$pair_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1 || true)
 
       if [[ -n "$pair_addr" ]]; then
         log "Device found! Pairing with ${pair_addr}..."
@@ -66,11 +66,11 @@ wait_for_mdns() {
           local connect_line
           connect_line=$(adb mdns services 2>/dev/null | grep "_adb-tls-connect" | head -1 || true)
           local connect_addr
-          connect_addr=$(echo "$connect_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
+          connect_addr=$(echo "$connect_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1 || true)
 
           if [[ -n "$connect_addr" ]]; then
             log "Connecting to ${connect_addr}..."
-            adb connect "$connect_addr" 2>&1
+            adb connect "$connect_addr" 2>&1 || log "Connect failed (device may still be reachable)"
           fi
           return 0
         else
