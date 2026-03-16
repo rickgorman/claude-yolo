@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     gnupg \
     unzip \
     jq \
+    qrencode \
     sudo \
     # Java 17 for Android SDK
     openjdk-17-jdk-headless
@@ -92,5 +93,9 @@ WORKDIR /workspace
 # Entrypoint
 COPY --chown=claude:claude entrypoint.sh /home/claude/entrypoint.sh
 RUN chmod +x /home/claude/entrypoint.sh
+
+COPY --chown=claude:claude adb-qr-pair.sh /home/claude/adb-qr-pair.sh
+RUN chmod +x /home/claude/adb-qr-pair.sh \
+    && ln -s /home/claude/adb-qr-pair.sh /usr/local/bin/adb-qr-pair
 
 ENTRYPOINT ["/home/claude/entrypoint.sh"]

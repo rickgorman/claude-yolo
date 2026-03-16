@@ -344,6 +344,14 @@ adb() {
 
 sleep() { :; }
 
+# Override command so "command -v qrencode" fails
+command() {
+  if [[ "$1" == "-v" && "$2" == "qrencode" ]]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+
 # Feed "Y" then empty string (for pairing address prompt) to exit the manual flow
 # Redirect stderr (where the tip box is printed) to a file
 _TIP_OUTPUT="$TMPDIR_BASE/tip-output"
@@ -355,7 +363,7 @@ assert_contains "Shows brew install command" "$output" "brew install qrencode"
 assert_contains "Shows tip box border" "$output" "one-scan QR pairing"
 
 rm -f "$_TIP_OUTPUT"
-unset -f uname adb sleep
+unset -f uname adb sleep command
 
 ########################################
 # Tests: preflight_android_adb — skip on 'n'

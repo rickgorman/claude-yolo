@@ -63,6 +63,8 @@ adb devices -l 2>/dev/null | tail -n +2 | grep -v "^$" | while read -r line; do
   log "Device: $line"
 done || true
 
+log "QR pairing available: run 'adb-qr-pair' to reconnect wireless debugging"
+
 # Ensure gradlew is executable if present
 if [[ -f /workspace/gradlew ]]; then
   chmod +x /workspace/gradlew

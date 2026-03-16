@@ -21,6 +21,7 @@ UNIT_TEST_FILES=(
   "test-git-config.sh"
   "test-ports.sh"
   "test-cli-integration.sh"
+  "test-adb-qr-pair.sh"
 )
 
 exec "$TEST_DIR/run-all-tests.sh" "${UNIT_TEST_FILES[@]}"
